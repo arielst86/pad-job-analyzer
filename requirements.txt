@@ -1,7 +1,6 @@
 streamlit
 python-docx
-PyMuPDF
-transformers
+pymupdf
+transformers==4.30.2
 spacy
-torch
-sentencepiece==0.1.99
+torch==2.0.1
