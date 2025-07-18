@@ -28,7 +28,7 @@ def estimate_jobs(text):
     sector = next((s for s in sector_weights if s in text), "general")
     multiplier = sector_weights.get(sector, 1.0)
 
-    # Investment-based heuristic
+   this is the snippet i currenly have, which part should I replace:  # Investment-based heuristic
     match = re.search(r"\$\s?([\d,]+\.?\d*)\s?(million|billion)", text)
     if match:
         amount = float(match.group(1).replace(",", ""))
