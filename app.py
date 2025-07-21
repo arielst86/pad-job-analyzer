@@ -93,6 +93,7 @@ def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, c
 # --- Streamlit UI ---
 st.set_page_config(page_title="PAD Job Analyzer", layout="wide")
 
+# --- World Bank Color Palette ---
 WB_COLORS = {
     "primary": "#003366",
     "accent": "#0072BC",
@@ -101,23 +102,26 @@ WB_COLORS = {
     "text": "#333333"
 }
 
+# --- Custom CSS ---
 st.markdown(
     f"""
     <style>
-        body {{
+        html, body {{
             background-color: {WB_COLORS['background']};
             color: {WB_COLORS['text']};
             font-family: 'Segoe UI', sans-serif;
         }}
         .title {{
-            color: {WB_COLORS['primary']};
             font-size: 2.5em;
             font-weight: bold;
+            color: {WB_COLORS['primary']};
+            margin-bottom: 0.5em;
         }}
-        .section-header {{
-            color: {WB_COLORS['accent']};
+        .section {{
             font-size: 1.5em;
+            color: {WB_COLORS['accent']};
             margin-top: 2em;
+            margin-bottom: 0.5em;
         }}
         .info-box {{
             background-color: {WB_COLORS['highlight']};
@@ -130,9 +134,11 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# --- Header ---
 st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png", width=150)
 st.markdown('<div class="title">PAD Job Creation Analyzer</div>', unsafe_allow_html=True)
 
+# --- File Upload ---
 uploaded_file = st.file_uploader("Upload a PAD PDF", type="pdf")
 
 if uploaded_file:
@@ -141,7 +147,7 @@ if uploaded_file:
 
     results = estimate_jobs(full_text)
 
-    st.markdown('<div class="section-header">Job Creation Estimate</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section">Job Creation Estimate</div>', unsafe_allow_html=True)
     st.markdown(f"**Sector:** {results['sector'].capitalize()}")
     st.markdown(f"**Investment Estimate:** ${results['investment_estimate_million_usd']:.2f} million")
     st.markdown(f"**Confidence Level:** {results['confidence']}")
@@ -153,19 +159,19 @@ if uploaded_file:
     st.markdown(f"<div class='info-box'>{results['indirect_explanation']}</div>", unsafe_allow_html=True)
 
     if results["better_jobs"] or results["more_jobs"]:
-        st.markdown('<div class="section-header">Additional Job Dimensions</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section">Additional Job Dimensions</div>', unsafe_allow_html=True)
         if results["better_jobs"]:
             st.info("Better Jobs: skills, training, labor standards")
         if results["more_jobs"]:
             st.info("More Jobs: job creation, MSMEs, labor demand")
 
-    st.markdown('<div class="section-header">Source Evidence</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section">Source Evidence</div>', unsafe_allow_html=True)
     st.markdown(f"**Investment Reference:** *{results['investment_sentence'].strip()}*")
     if results["sector_sentence"]:
         st.markdown(f"**Sector Reference:** *{results['sector_sentence'].strip()}*")
     st.markdown(f"**Quoted Source Text:**\n> {results['source_quote']}")
 
-    st.markdown('<div class="section-header">Download Results</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section">Download Results</div>', unsafe_allow_html=True)
     df = pd.DataFrame([results])
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
