@@ -1,5 +1,5 @@
-
 streamlit
 PyPDF2
 matplotlib
-pip install XlsxWriter
+pandas
+XlsxWriter
