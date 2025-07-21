@@ -138,8 +138,15 @@ st.markdown(
 st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png", width=150)
 st.markdown('<div class="title">PAD Job Creation Analyzer</div>', unsafe_allow_html=True)
 
-# --- File Upload ---
-uploaded_file = st.file_uploader("Upload a PAD PDF", type="pdf")
+# --- File Uploads ---
+col1, col2 = st.columns(2)
+with col1:
+    uploaded_file = st.file_uploader("Upload a PAD PDF", type="pdf")
+with col2:
+    uploaded_image = st.file_uploader("Upload an image (optional)", type=["png", "jpg", "jpeg"])
+
+if uploaded_image:
+    st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
 
 if uploaded_file:
     reader = PyPDF2.PdfReader(uploaded_file)
