@@ -1,11 +1,12 @@
 import streamlit as st
 import PyPDF2
 import re
-import matplotlib.pyplot as plt
 import json
+import pandas as pd
+from io import BytesIO
 
 # --- Job Estimation Logic ---
-def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, custom_multiplier=None, explanation_level="detailed"):
+def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, custom_multiplier=None):
     text = text.lower()
 
     # --- Sector detection ---
@@ -69,40 +70,64 @@ def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, c
     better_jobs = any(k in text for k in better_keywords)
     more_jobs = any(k in text for k in more_keywords)
 
-    # --- Explanations ---
-    if explanation_level == "short":
-        direct_explanation = f"{direct_jobs} direct jobs estimated based on the investment and sector."
-        indirect_explanation = f"{indirect_jobs} indirect jobs estimated from supporting activities."
-    else:
-        direct_explanation = (
-            f"Based on an investment of approximately ${amount:.2f} million and the sector identified as '{sector}', "
-            f"we estimate {direct_jobs} direct jobs. This is calculated using a base rate of {jobs_per_million} jobs per million USD, "
-            f"adjusted by a sector multiplier of {multiplier}. About {int(direct_pct * 100)}% of total jobs are assumed to be direct, "
-            f"including roles like construction, engineering, and project implementation staff."
-        )
-        indirect_explanation = (
-            f"An estimated {indirect_jobs} indirect jobs are expected as a result of the same investment. "
-            f"These jobs arise in supporting industries such as supply chains, logistics, and services. "
-            f"The {int(indirect_pct * 100)}% share reflects typical indirect job creation patterns in development projects, "
-            f"also adjusted by the sector multiplier of {multiplier}."
-        )
+    # --- Source quote ---
+    quote_match = re.search(r"([^.]*?(?:job creation|employment|labor|msmes|skills|training)[^.]*\.)", text)
+    source_quote = quote_match.group(1).strip() if quote_match else "No specific quote found."
 
     return {
         "sector": sector,
         "investment_estimate_million_usd": amount,
         "direct_jobs": direct_jobs,
         "indirect_jobs": indirect_jobs,
-        "direct_explanation": direct_explanation,
-        "indirect_explanation": indirect_explanation,
+        "direct_explanation": (
+            f"Based on an investment of approximately ${amount:.2f} million and the sector identified as '{sector}', "
+            f"we estimate {direct_jobs} direct jobs. This is calculated using a base rate of {jobs_per_million} jobs per million USD, "
+            f"adjusted by a sector multiplier of {multiplier}. About {int(direct_pct * 100)}% of total jobs are assumed to be direct, "
+            f"including roles like construction, engineering, and project implementation staff."
+        ),
+        "indirect_explanation": (
+            f"An estimated {indirect_jobs} indirect jobs are expected as a result of the same investment. "
+            f"These jobs arise in supporting industries such as supply chains, logistics, and services. "
+            f"The {int(indirect_pct * 100)}% share reflects typical indirect job creation patterns in development projects, "
+            f"also adjusted by the sector multiplier of {multiplier}."
+        ),
         "investment_sentence": investment_sentence,
         "sector_sentence": sector_sentence,
         "confidence": confidence,
         "better_jobs": better_jobs,
-        "more_jobs": more_jobs
+        "more_jobs": more_jobs,
+        "source_quote": source_quote
     }
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="PAD Job Analyzer", layout="wide")
+
+# --- Custom Styling ---
+st.markdown("""
+    <style>
+        .main {
+            background-color: #f5f9ff;
+        }
+        .block-container {
+            padding-top: 2rem;
+        }
+        h1 {
+            color: #003f6f;
+        }
+        .stButton>button {
+            background-color: #0072bc;
+            color: white;
+        }
+        .stDownloadButton>button {
+            background-color: #0072bc;
+            color: white;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- Logo ---
+st.image("https://www.worldbank.org/content/dam/wbr/logo/logo-wbg-header-en.svg", width=300)
+
 st.title("📄 PAD Job Creation Analyzer")
 
 uploaded_file = st.file_uploader("Upload a PAD PDF", type="pdf")
@@ -111,24 +136,9 @@ if uploaded_file:
     reader = PyPDF2.PdfReader(uploaded_file)
     full_text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
 
-    st.subheader("⚙️ Customize Assumptions")
-    jobs_per_million = st.slider("Jobs per $1M investment", 1, 50, 10)
-    direct_pct = st.slider("Direct job share (%)", 10, 90, 60) / 100
-    indirect_pct = 1 - direct_pct
-    custom_multiplier = st.number_input("Custom sector multiplier (optional)", min_value=0.1, max_value=5.0, value=1.0)
-    use_custom_multiplier = st.checkbox("Use custom multiplier?", value=False)
-    explanation_level = st.radio("Explanation detail", ["short", "detailed"], index=1)
+    results = estimate_jobs(full_text)
 
-    st.subheader("📊 Job Creation Estimate")
-    results = estimate_jobs(
-        full_text,
-        jobs_per_million=jobs_per_million,
-        direct_pct=direct_pct,
-        indirect_pct=indirect_pct,
-        custom_multiplier=custom_multiplier if use_custom_multiplier else None,
-        explanation_level=explanation_level
-    )
-
+    st.markdown("## 📊 Job Creation Estimate")
     st.markdown(f"**Sector:** {results['sector'].capitalize()}")
     st.markdown(f"**Investment Estimate:** ${results['investment_estimate_million_usd']:.2f} million")
     st.markdown(f"**Confidence Level:** {results['confidence']}")
@@ -155,20 +165,12 @@ if uploaded_file:
     st.markdown(f"**Investment Reference:** _{results['investment_sentence'].strip()}_")
     if results["sector_sentence"]:
         st.markdown(f"**Sector Reference:** _{results['sector_sentence'].strip()}_")
+    st.markdown(f"**Quoted Source Text:** > _{results['source_quote']}_")
 
-    # Visualization
-    st.markdown("### 📈 Job Distribution")
-    fig, ax = plt.subplots()
-    ax.pie(
-        [results["direct_jobs"], results["indirect_jobs"]],
-        labels=["Direct Jobs", "Indirect Jobs"],
-        autopct="%1.1f%%",
-        colors=["#4CAF50", "#2196F3"]
-    )
-    ax.axis("equal")
-    st.pyplot(fig)
-
-    # Download
+    # Download as Excel
     st.markdown("### 💾 Download Results")
-    json_data = json.dumps(results, indent=2)
-    st.download_button("Download as JSON", data=json_data, file_name="job_estimate.json", mime="application/json")
+    df = pd.DataFrame([results])
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Job Estimate')
+    st.download_button("Download as Excel", data=output.getvalue(), file_name="job_estimate.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
