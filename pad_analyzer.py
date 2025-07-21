@@ -1,56 +1,179 @@
+import streamlit as st
+import PyPDF2
 import re
-import spacy
-from transformers import pipeline
-from docx import Document
-import fitz  # PyMuPDF
+import pandas as pd
+from io import BytesIO
 
-# Load NLP models
-summarizer = pipeline("summarization")
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+# --- Job Estimation Logic ---
+def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, custom_multiplier=None):
+    text = text.lower()
 
-# Load or download spaCy model
-try:
-    nlp = spacy.load("en_core_web_sm")
-except:
-    from spacy.cli import download
-    download("en_core_web_sm")
-    nlp = spacy.load("en_core_web_sm")
+    sector_weights = {
+        "infrastructure": 1.5,
+        "education": 1.2,
+        "health": 1.3,
+        "agriculture": 1.4,
+        "digital": 1.1
+    }
+    sector_sentence = ""
+    sector = "general"
+    for s in sector_weights:
+        if s in text:
+            sector = s
+            match = re.search(rf"([^.]*\b{s}\b[^.]*)", text)
+            if match:
+                sector_sentence = match.group(1)
+            break
+    multiplier = custom_multiplier if custom_multiplier else sector_weights.get(sector, 1.0)
 
-def extract_text(file):
-    if file.name.endswith(".pdf"):
-        doc = fitz.open(stream=file.read(), filetype="pdf")
-        return "\n".join([page.get_text() for page in doc])
-    elif file.name.endswith(".docx"):
-        doc = Document(file)
-        return "\n".join([para.text for para in doc.paragraphs])
-    return ""
+    amount = None
+    investment_sentence = ""
+    match = re.search(r"(?:\$)?\s?([\d,]+\.?\d*)\s?(million|billion)", text)
+    if match:
+        try:
+            amount = float(match.group(1).replace(",", ""))
+            if match.group(2).lower() == "billion":
+                amount *= 1000
+            investment_sentence = match.group(0)
+        except:
+            amount = None
 
-def extract_job_related_sections(text):
-    job_keywords = ['employment', 'jobs', 'labor', 'workforce', 'job creation', 'skills', 'training']
-    paragraphs = text.split('\n\n')
-    return " ".join([p for p in paragraphs if any(k in p.lower() for k in job_keywords)])
+    if amount is None:
+        match_alt = re.search(r"(total project cost[^$\n\r]*?([\d,]+\.?\d*))", text)
+        if match_alt:
+            try:
+                amount = float(match_alt.group(2).replace(",", ""))
+                investment_sentence = match_alt.group(1)
+            except:
+                amount = None
+    if amount is None:
+        amount = 50
+        investment_sentence = "No clear investment amount found. Defaulted to $50M."
+        confidence = "Low"
+    else:
+        confidence = "High" if sector != "general" else "Medium"
 
-def estimate_jobs(text):
-    direct = re.findall(r'(\d{3,})\s+(direct|permanent)?\s*jobs?', text, re.IGNORECASE)
-    indirect = re.findall(r'(\d{3,})\s+(indirect|temporary)?\s*jobs?', text, re.IGNORECASE)
+    base_jobs = amount * jobs_per_million
+    direct_jobs = int(base_jobs * direct_pct * multiplier)
+    indirect_jobs = int(base_jobs * indirect_pct * multiplier)
+
+    better_keywords = ["skills", "training", "capacity building", "labor standards"]
+    more_keywords = ["job creation", "employment opportunities", "labor demand", "msmes"]
+
+    better_jobs = any(k in text for k in better_keywords)
+    more_jobs = any(k in text for k in more_keywords)
+
+    quote_match = re.search(r"([^.]*?(?:job creation|employment|labor|msmes|skills|training)[^.]*\.)", text)
+    source_quote = quote_match.group(1).strip() if quote_match else "No specific quote found."
+
     return {
-        "direct_jobs_estimate": sum(int(j[0]) for j in direct),
-        "indirect_jobs_estimate": sum(int(j[0]) for j in indirect)
+        "sector": sector,
+        "investment_estimate_million_usd": amount,
+        "direct_jobs": direct_jobs,
+        "indirect_jobs": indirect_jobs,
+        "direct_explanation": (
+            f"Based on an investment of approximately ${amount:.2f} million and the sector identified as '{sector}', "
+            f"we estimate {direct_jobs} direct jobs. This is calculated using a base rate of {jobs_per_million} jobs per million USD, "
+            f"adjusted by a sector multiplier of {multiplier}. About {int(direct_pct * 100)}% of total jobs are assumed to be direct."
+        ),
+        "indirect_explanation": (
+            f"An estimated {indirect_jobs} indirect jobs are expected as a result of the same investment. "
+            f"These jobs arise in supporting industries such as supply chains, logistics, and services. "
+            f"The {int(indirect_pct * 100)}% share reflects typical indirect job creation patterns in development projects, "
+            f"also adjusted by the sector multiplier of {multiplier}."
+        ),
+        "investment_sentence": investment_sentence,
+        "sector_sentence": sector_sentence,
+        "confidence": confidence,
+        "better_jobs": better_jobs,
+        "more_jobs": more_jobs,
+        "source_quote": source_quote
     }
 
-def assess_job_quality(text):
-    labels = ["formal employment", "skills training", "gender inclusion", "youth employment", "decent work"]
-    result = classifier(text, candidate_labels=labels)
-    return dict(zip(result["labels"], [round(s, 2) for s in result["scores"]]))
+# --- Streamlit UI ---
+st.set_page_config(page_title="PAD Job Analyzer", layout="wide")
 
-def analyze_pad(file):
-    full_text = extract_text(file)
-    job_text = extract_job_related_sections(full_text)
-    job_estimates = estimate_jobs(job_text)
-    job_quality = assess_job_quality(job_text)
-    summary = summarizer(job_text, max_length=150, min_length=30, do_sample=False)[0]['summary_text']
-    return {
-        "summary": summary,
-        "job_estimates": job_estimates,
-        "job_quality_indicators": job_quality
-    }
+# --- World Bank Color Palette ---
+WB_COLORS = {
+    "primary": "#003366",
+    "accent": "#0072BC",
+    "background": "#F2F2F2",
+    "highlight": "#E6F2F8",
+    "text": "#333333"
+}
+
+# --- Custom CSS ---
+st.markdown(
+    f"""
+    <style>
+        html, body {{
+            background-color: {WB_COLORS['background']};
+            color: {WB_COLORS['text']};
+            font-family: 'Segoe UI', sans-serif;
+        }}
+        .title {{
+            font-size: 2.5em;
+            font-weight: bold;
+            color: {WB_COLORS['primary']};
+            margin-bottom: 0.5em;
+        }}
+        .section {{
+            font-size: 1.5em;
+            color: {WB_COLORS['accent']};
+            margin-top: 2em;
+            margin-bottom: 0.5em;
+        }}
+        .info-box {{
+            background-color: {WB_COLORS['highlight']};
+            padding: 1em;
+            border-left: 4px solid {WB_COLORS['accent']};
+            margin-bottom: 1em;
+        }}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# --- Header ---
+st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png", width=150)
+st.markdown('<div class="title">PAD Job Creation Analyzer</div>', unsafe_allow_html=True)
+
+# --- File Upload ---
+uploaded_file = st.file_uploader("Upload a PAD PDF", type="pdf")
+
+if uploaded_file:
+    reader = PyPDF2.PdfReader(uploaded_file)
+    full_text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+
+    results = estimate_jobs(full_text)
+
+    st.markdown('<div class="section">Job Creation Estimate</div>', unsafe_allow_html=True)
+    st.markdown(f"**Sector:** {results['sector'].capitalize()}")
+    st.markdown(f"**Investment Estimate:** ${results['investment_estimate_million_usd']:.2f} million")
+    st.markdown(f"**Confidence Level:** {results['confidence']}")
+
+    st.markdown(f"**Direct Jobs:** {results['direct_jobs']}")
+    st.markdown(f"<div class='info-box'>{results['direct_explanation']}</div>", unsafe_allow_html=True)
+
+    st.markdown(f"**Indirect Jobs:** {results['indirect_jobs']}")
+    st.markdown(f"<div class='info-box'>{results['indirect_explanation']}</div>", unsafe_allow_html=True)
+
+    if results["better_jobs"] or results["more_jobs"]:
+        st.markdown('<div class="section">Additional Job Dimensions</div>', unsafe_allow_html=True)
+        if results["better_jobs"]:
+            st.info("Better Jobs: skills, training, labor standards")
+        if results["more_jobs"]:
+            st.info("More Jobs: job creation, MSMEs, labor demand")
+
+    st.markdown('<div class="section">Source Evidence</div>', unsafe_allow_html=True)
+    st.markdown(f"**Investment Reference:** *{results['investment_sentence'].strip()}*")
+    if results["sector_sentence"]:
+        st.markdown(f"**Sector Reference:** *{results['sector_sentence'].strip()}*")
+    st.markdown(f"**Quoted Source Text:**\n> {results['source_quote']}")
+
+    st.markdown('<div class="section">Download Results</div>', unsafe_allow_html=True)
+    df = pd.DataFrame([results])
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Job Estimate')
+    st.download_button("Download as Excel", data=output.getvalue(), file_name="job_estimate.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
