@@ -1,7 +1,6 @@
 import streamlit as st
 import PyPDF2
 import re
-import json
 import pandas as pd
 from io import BytesIO
 
@@ -9,7 +8,6 @@ from io import BytesIO
 def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, custom_multiplier=None):
     text = text.lower()
 
-    # --- Sector detection ---
     sector_weights = {
         "infrastructure": 1.5,
         "education": 1.2,
@@ -28,10 +26,8 @@ def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, c
             break
     multiplier = custom_multiplier if custom_multiplier else sector_weights.get(sector, 1.0)
 
-    # --- Investment detection ---
     amount = None
     investment_sentence = ""
-
     match = re.search(r"(?:\$)?\s?([\d,]+\.?\d*)\s?(million|billion)", text)
     if match:
         try:
@@ -58,19 +54,16 @@ def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, c
     else:
         confidence = "High" if sector != "general" else "Medium"
 
-    # --- Job calculations ---
     base_jobs = amount * jobs_per_million
     direct_jobs = int(base_jobs * direct_pct * multiplier)
     indirect_jobs = int(base_jobs * indirect_pct * multiplier)
 
-    # --- Better/More Jobs Detection ---
     better_keywords = ["skills", "training", "capacity building", "labor standards"]
     more_keywords = ["job creation", "employment opportunities", "labor demand", "msmes"]
 
     better_jobs = any(k in text for k in better_keywords)
     more_jobs = any(k in text for k in more_keywords)
 
-    # --- Source quote ---
     quote_match = re.search(r"([^.]*?(?:job creation|employment|labor|msmes|skills|training)[^.]*\.)", text)
     source_quote = quote_match.group(1).strip() if quote_match else "No specific quote found."
 
@@ -105,17 +98,15 @@ st.set_page_config(page_title="PAD Job Analyzer", layout="wide")
 # --- Custom Styling ---
 st.markdown("""
     <style>
-        html, body, [class*="css"] {
-            font-family: 'Segoe UI', sans-serif;
+        html, body {
             background-color: #f5f9ff;
         }
         h1, h2, h3 {
-            color: #003f6f;
+            color: #86A5A5;
         }
         .stButton>button, .stDownloadButton>button {
-            background-color: #0072BC;
+            background-color: #86A5A5;
             color: white;
-            border: none;
             border-radius: 6px;
             padding: 0.6em 1.2em;
             font-weight: 600;
@@ -151,7 +142,6 @@ if uploaded_file:
     st.markdown(f"**Indirect Jobs:** {results['indirect_jobs']}")
     st.info(results["indirect_explanation"])
 
-    # Tags
     tags = []
     if results["better_jobs"]:
         tags.append("🟢 Better Jobs (skills, training, labor standards)")
@@ -162,14 +152,12 @@ if uploaded_file:
         for tag in tags:
             st.success(tag)
 
-    # Source evidence
     st.markdown("### 📌 Source Evidence")
     st.markdown(f"**Investment Reference:** _{results['investment_sentence'].strip()}_")
     if results["sector_sentence"]:
         st.markdown(f"**Sector Reference:** _{results['sector_sentence'].strip()}_")
     st.markdown(f"**Quoted Source Text:** > _{results['source_quote']}_")
 
-    # Download as Excel
     st.markdown("### 💾 Download Results")
     df = pd.DataFrame([results])
     output = BytesIO()
