@@ -28,15 +28,22 @@ def estimate_jobs(text):
     sector = next((s for s in sector_weights if s in text), "general")
     multiplier = sector_weights.get(sector, 1.0)
 
-   this is the snippet i currenly have, which part should I replace:  # Investment-based heuristic
-    match = re.search(r"\$\s?([\d,]+\.?\d*)\s?(million|billion)", text)
-    if match:
+   
+# Investment-based heuristic
+match = re.search(r"\$\s?([\d,]+\.?\d*)\s?(million|billion)", text)
+if match:
+    try:
         amount = float(match.group(1).replace(",", ""))
         if match.group(2) == "billion":
             amount *= 1000
-    else:
-    # fallback value if no match is found
-    amount = 106.25  # or any default you prefer
+    except (ValueError, IndexError):
+        amount = 50  # fallback if parsing fails
+        st.warning("Could not parse investment amount. Using default estimate of $50M.")
+else:
+    amount = 50  # fallback if no match found
+    st.warning("Could not detect investment amount in the text. Using default estimate of $50M.")
+
+
 
     base_jobs = amount * 10  # 10 jobs per million as a base
     direct_jobs = int(base_jobs * 0.6 * multiplier)
