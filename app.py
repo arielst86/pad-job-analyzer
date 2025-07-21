@@ -105,37 +105,30 @@ st.set_page_config(page_title="PAD Job Analyzer", layout="wide")
 # --- Custom Styling ---
 st.markdown("""
     <style>
-        .main {
+        html, body, [class*="css"] {
+            font-family: 'Segoe UI', sans-serif;
             background-color: #f5f9ff;
         }
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-        }
-        h1, h2, h3, h4 {
+        h1, h2, h3 {
             color: #003f6f;
         }
         .stButton>button, .stDownloadButton>button {
             background-color: #0072BC;
             color: white;
+            border: none;
             border-radius: 6px;
             padding: 0.6em 1.2em;
             font-weight: 600;
             font-size: 1rem;
         }
         .stMarkdown {
-            font-family: 'Segoe UI', sans-serif;
-        }
-        .stInfo {
-            background-color: #e6f2fa;
-            border-left: 4px solid #0072BC;
-            padding: 1em;
+            font-size: 1.05rem;
         }
     </style>
 """, unsafe_allow_html=True)
 
 # --- Logo ---
-st.image("https://www.worldbank.org/content/dam/wbr/brand-assets/logo-wbg-en.png", width=250)
+st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png", width=150)
 
 st.title("📄 PAD Job Creation Analyzer")
 
