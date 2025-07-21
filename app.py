@@ -49,16 +49,23 @@ def estimate_jobs(text):
     direct_jobs = int(base_jobs * 0.6 * multiplier)
     indirect_jobs = int(base_jobs * 0.4 * multiplier)
 
-    # Simple explanations
+    # Detailed explanations
     direct_explanation = (
-        f"Based on the document's mention of an investment of approximately ${amount:.2f} million "
-        f"in the '{sector}' sector, we estimate {direct_jobs} direct jobs. "
-        f"This includes roles like construction, staffing, and operations."
+        f"Based on the document's mention of an investment of approximately ${amount:.2f} million, "
+        f"we estimate {direct_jobs} direct jobs. This estimate assumes a base rate of 10 jobs created "
+        f"per million USD invested, which is then adjusted by a multiplier of {multiplier} to reflect "
+        f"the labor intensity of the '{sector}' sector. About 60% of the total jobs are considered direct, "
+        f"which typically include roles such as construction workers, engineers, project managers, and "
+        f"other personnel directly involved in implementing the project activities."
     )
 
     indirect_explanation = (
-        f"In addition, we estimate {indirect_jobs} indirect jobs based on the same investment. "
-        f"These include jobs created through supply chains, services, and supporting industries."
+        f"In addition to direct employment, we estimate {indirect_jobs} indirect jobs. These are jobs "
+        f"that are not created by the project itself but arise in the broader economy as a result of the investment. "
+        f"This includes employment in supply chains (e.g., materials, equipment, logistics), services (e.g., food, transport), "
+        f"and other sectors that support or benefit from the project. The 40% share of indirect jobs is a standard assumption "
+        f"based on economic modeling of infrastructure and development projects, and is also adjusted by the sector multiplier "
+        f"of {multiplier} to reflect the expected ripple effects in the local economy."
     )
 
     return {
