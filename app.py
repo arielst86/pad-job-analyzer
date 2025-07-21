@@ -5,25 +5,31 @@ import pandas as pd
 import requests
 from io import BytesIO
 
-# --- Query World Bank Projects API ---
-def get_similar_projects(sector):
+# --- Query World Bank Projects API for Equivalent Projects ---
+def get_equivalent_projects(sector, amount_million):
     url = f"https://search.worldbank.org/api/v2/projects?q=sectorname:{sector}&format=json"
     try:
         response = requests.get(url)
         data = response.json()
         projects = []
         for pid, project in data.get("projects", {}).items():
-            rf = project.get("resultsframework", "")
-            if rf and "job" in rf.lower():
-                match = re.search(r"(\d{1,3}(?:,\d{3})*)\s+jobs", rf.lower())
-                if match:
-                    job_count = int(match.group(1).replace(",", ""))
+            try:
+                status = project.get("projectstatus", "").lower()
+                net_commitment = float(project.get("totalcommamt", 0)) / 1_000_000
+                if status == "closed" and abs(net_commitment - amount_million) / amount_million <= 0.25:
+                    rf = project.get("resultsframework", "")
+                    job_match = re.search(r"(\d{1,3}(?:,\d{3})*)\s+jobs", rf.lower()) if rf else None
+                    jobs_created = int(job_match.group(1).replace(",", "")) if job_match else "N/A"
                     projects.append({
-                        "id": pid,
-                        "title": project.get("project_name", "Unnamed Project"),
-                        "jobs": job_count,
-                        "url": f"https://projects.worldbank.org/en/projects-operations/project-detail/{pid}"
+                        "Project Name": project.get("project_name", "Unnamed"),
+                        "Country": project.get("countryshortname", "Unknown"),
+                        "P-Code": pid,
+                        "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
+                        "Jobs Created": jobs_created,
+                        "Similarity": "Same sector, similar commitment, closed"
                     })
+            except:
+                continue
         return projects
     except Exception as e:
         print("API error:", e)
@@ -81,7 +87,7 @@ def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4):
     quote_match = re.search(r"([^.]*?(?:job creation|employment|labor|msmes|skills|training)[^.]*\.)", text)
     source_quote = quote_match.group(1).strip() if quote_match else "No specific quote found."
 
-    similar_projects = get_similar_projects(sector)
+    equivalent_projects = get_equivalent_projects(sector, amount)
 
     return {
         "sector": sector,
@@ -94,7 +100,7 @@ def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4):
         "sector_sentence": sector_sentence,
         "confidence": confidence,
         "source_quote": source_quote,
-        "similar_projects": similar_projects
+        "equivalent_projects": equivalent_projects
     }
 
 # --- Streamlit UI ---
@@ -105,7 +111,7 @@ st.markdown(
     """
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <div style="font-size: 2.5em; font-weight: bold; color: #003366;">PAD Job Creation Analyzer</div>
-        <img src="https://upload.wikimedia.org/wikipedia/umb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png
+        https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png
     </div>
     """,
     unsafe_allow_html=True
@@ -155,10 +161,11 @@ if uploaded_file:
         st.markdown(f"**Sector Reference:** *{results['sector_sentence']}*")
     st.markdown(f"**Quoted Source Text:**\n> {results['source_quote']}")
 
-    if results["similar_projects"]:
-        st.subheader("Reference Projects from World Bank")
-        for proj in results["similar_projects"][:5]:
-            st.markdown(f"- [{proj['title']}]({oj['jobs']} jobs reported")
+    # --- Equivalent Projects Table ---
+    if results["equivalent_projects"]:
+        st.subheader("Equivalent Projects")
+        eq_df = pd.DataFrame(results["equivalent_projects"])
+        st.dataframe(eq_df)
 
     st.subheader("Download Results")
     df = pd.DataFrame([results])
