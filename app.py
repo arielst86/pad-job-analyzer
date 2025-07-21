@@ -66,11 +66,17 @@ def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, c
     quote_match = re.search(r"([^.]*?(?:job creation|employment|labor|msmes|skills|training)[^.]*\.)", text)
     source_quote = quote_match.group(1).strip() if quote_match else "No specific quote found."
 
+    # Estimate better jobs as 30% of direct and 20% of indirect if keywords are present
+    better_direct_jobs = int(direct_jobs * 0.3) if better_jobs else 0
+    better_indirect_jobs = int(indirect_jobs * 0.2) if better_jobs else 0
+
     return {
         "sector": sector,
         "investment_estimate_million_usd": amount,
         "direct_jobs": direct_jobs,
         "indirect_jobs": indirect_jobs,
+        "better_direct_jobs": better_direct_jobs,
+        "better_indirect_jobs": better_indirect_jobs,
         "direct_explanation": (
             f"Based on an investment of approximately ${amount:.2f} million and the sector identified as '{sector}', "
             f"we estimate {direct_jobs} direct jobs. This is calculated using a base rate of {jobs_per_million} jobs per million USD, "
@@ -111,11 +117,15 @@ st.markdown(
             color: {WB_COLORS['text']};
             font-family: 'Segoe UI', sans-serif;
         }}
+        .title-bar {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
         .title {{
             font-size: 2.5em;
             font-weight: bold;
             color: {WB_COLORS['primary']};
-            margin-bottom: 0.5em;
         }}
         .section {{
             font-size: 1.5em;
@@ -134,27 +144,19 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
-# --- Header with Top-Right Image ---
+# --- Header with Top-Right Logo ---
 st.markdown(
-    f"""
-    <div style="display: flex; justify-content: space-between; align-items: center;">
+    """
+    <div class="title-bar">
         <div class="title">PAD Job Creation Analyzer</div>
-        https://en.m.wikipedia.org/wiki/File:The_World_Bank_logo.svg
+        <img src="https://upload.wikimedia.org/wikipedia/commons4/World_Bank_logo.svg/512px-World_Bank_logo.svg.png
     </div>
     """,
     unsafe_allow_html=True
 )
 
-# --- File Uploads ---
-col1, col2 = st.columns(2)
-with col1:
-    uploaded_file = st.file_uploader("Upload a PAD PDF", type="pdf")
-with col2:
-    uploaded_image = st.file_uploader("Upload an image (optional)", type=["png", "jpg", "jpeg"])
-
-if uploaded_image:
-    st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
+# --- File Upload ---
+uploaded_file = st.file_uploader("Upload a PAD PDF", type="pdf")
 
 if uploaded_file:
     reader = PyPDF2.PdfReader(uploaded_file)
@@ -170,15 +172,27 @@ if uploaded_file:
     st.markdown(f"**Direct Jobs:** {results['direct_jobs']}")
     st.markdown(f"<div class='info-box'>{results['direct_explanation']}</div>", unsafe_allow_html=True)
 
+    if results["better_direct_jobs"] > 0:
+        st.markdown(
+            f"**Estimated Better Direct Jobs:** {results['better_direct_jobs']}")
+        st.markdown(
+            f"<div class='info-box'>Approximately {results['better_direct_jobs']} of the direct jobs are considered 'better jobs'. "
+            f"This estimate is based on the presence of keywords such as 'skills', 'training', 'capacity building', and 'labor standards' in the PAD. "
+            f'These indicators suggest that a portion of the direct employment will involve improved working conditions, upskilling, or formal labor protections.</div>',
+            unsafe_allow_html=True
+        )
+
     st.markdown(f"**Indirect Jobs:** {results['indirect_jobs']}")
     st.markdown(f"<div class='info-box'>{results['indirect_explanation']}</div>", unsafe_allow_html=True)
 
-    if results["better_jobs"] or results["more_jobs"]:
-        st.markdown('<div class="section">Additional Job Dimensions</div>', unsafe_allow_html=True)
-        if results["better_jobs"]:
-            st.info("Better Jobs: skills, training, labor standards")
-        if results["more_jobs"]:
-            st.info("More Jobs: job creation, MSMEs, labor demand")
+    if results["better_indirect_jobs"] > 0:
+        st.markdown(
+            f"**Estimated Better Indirect Jobs:** {results['better_indirect_jobs']}")
+        st.markdown(
+            f"<div class='info-box'>Roughly {results['better_indirect_jobs']} of the indirect jobs are also expected to be 'better jobs'. "
+            f"This reflects the likelihood that improved labor standards and training components in the project will extend to subcontractors, suppliers, and service providers.</div>",
+            unsafe_allow_html=True
+        )
 
     st.markdown('<div class="section">Source Evidence</div>', unsafe_allow_html=True)
     st.markdown(f"**Investment Reference:** *{results['investment_sentence'].strip()}*")
