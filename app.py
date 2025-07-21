@@ -1,20 +1,10 @@
 import streamlit as st
 import PyPDF2
 import re
-from collections import Counter
 
 # --- Job Estimation Logic ---
 def estimate_jobs(text):
     text = text.lower()
-
-    keywords = {
-        "direct": ["direct employment", "hiring", "staffing", "recruitment"],
-        "indirect": ["indirect jobs", "supply chain", "msmes", "contractors"],
-        "better": ["skills", "training", "capacity building", "labor standards"],
-        "more": ["job creation", "employment opportunities", "labor demand"]
-    }
-
-    counts = {k: sum(word in text for word in v) for k, v in keywords.items()}
 
     # Sector-based heuristic
     sector_weights = {
@@ -59,12 +49,16 @@ def estimate_jobs(text):
     direct_jobs = int(base_jobs * 0.6 * multiplier)
     indirect_jobs = int(base_jobs * 0.4 * multiplier)
 
-    explanation = (
-        f"The estimate is based on a detected investment of approximately ${amount:.2f} million. "
-        f"A base assumption of 10 jobs per million USD is applied, adjusted by a sector multiplier "
-        f"of {multiplier} for the '{sector}' sector. "
-        f"60% of the jobs are considered direct (e.g., construction, staffing), and 40% indirect "
-        f"(e.g., supply chain, services)."
+    # Simple explanations
+    direct_explanation = (
+        f"Based on the document's mention of an investment of approximately ${amount:.2f} million "
+        f"in the '{sector}' sector, we estimate {direct_jobs} direct jobs. "
+        f"This includes roles like construction, staffing, and operations."
+    )
+
+    indirect_explanation = (
+        f"In addition, we estimate {indirect_jobs} indirect jobs based on the same investment. "
+        f"These include jobs created through supply chains, services, and supporting industries."
     )
 
     return {
@@ -72,8 +66,8 @@ def estimate_jobs(text):
         "investment_estimate_million_usd": amount,
         "direct_jobs": direct_jobs,
         "indirect_jobs": indirect_jobs,
-        "keyword_counts": counts,
-        "explanation": explanation
+        "direct_explanation": direct_explanation,
+        "indirect_explanation": indirect_explanation
     }
 
 # --- Streamlit UI ---
@@ -91,13 +85,12 @@ if uploaded_file:
 
     st.subheader("📊 Job Creation Estimate")
     results = estimate_jobs(full_text)
-    st.json({
-        "Sector": results["sector"],
-        "Investment (Million USD)": results["investment_estimate_million_usd"],
-        "Direct Jobs": results["direct_jobs"],
-        "Indirect Jobs": results["indirect_jobs"],
-        "Keyword Counts": results["keyword_counts"]
-    })
 
-    st.markdown("### 🧠 Estimation Logic")
-    st.info(results["explanation"])
+    st.markdown(f"**Sector:** {results['sector'].capitalize()}")
+    st.markdown(f"**Investment Estimate:** ${results['investment_estimate_million_usd']:.2f} million")
+
+    st.markdown(f"**Direct Jobs:** {results['direct_jobs']}")
+    st.info(results["direct_explanation"])
+
+    st.markdown(f"**Indirect Jobs:** {results['indirect_jobs']}")
+    st.info(results["indirect_explanation"])
