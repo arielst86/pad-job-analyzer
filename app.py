@@ -59,12 +59,21 @@ def estimate_jobs(text):
     direct_jobs = int(base_jobs * 0.6 * multiplier)
     indirect_jobs = int(base_jobs * 0.4 * multiplier)
 
+    explanation = (
+        f"The estimate is based on a detected investment of approximately ${amount:.2f} million. "
+        f"A base assumption of 10 jobs per million USD is applied, adjusted by a sector multiplier "
+        f"of {multiplier} for the '{sector}' sector. "
+        f"60% of the jobs are considered direct (e.g., construction, staffing), and 40% indirect "
+        f"(e.g., supply chain, services)."
+    )
+
     return {
         "sector": sector,
         "investment_estimate_million_usd": amount,
         "direct_jobs": direct_jobs,
         "indirect_jobs": indirect_jobs,
-        "keyword_counts": counts
+        "keyword_counts": counts,
+        "explanation": explanation
     }
 
 # --- Streamlit UI ---
@@ -82,4 +91,13 @@ if uploaded_file:
 
     st.subheader("📊 Job Creation Estimate")
     results = estimate_jobs(full_text)
-    st.json(results)
+    st.json({
+        "Sector": results["sector"],
+        "Investment (Million USD)": results["investment_estimate_million_usd"],
+        "Direct Jobs": results["direct_jobs"],
+        "Indirect Jobs": results["indirect_jobs"],
+        "Keyword Counts": results["keyword_counts"]
+    })
+
+    st.markdown("### 🧠 Estimation Logic")
+    st.info(results["explanation"])
