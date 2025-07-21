@@ -111,7 +111,9 @@ st.markdown(
     """
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <div style="font-size: 2.5em; font-weight: bold; color: #003366;">PAD Job Creation Analyzer</div>
-        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png" height="
+        https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png
+    </div>
+    """,
     unsafe_allow_html=True
 )
 
