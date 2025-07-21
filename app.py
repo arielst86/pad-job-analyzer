@@ -46,7 +46,6 @@ def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, c
                 investment_sentence = match_alt.group(1)
             except:
                 amount = None
-
     if amount is None:
         amount = 50
         investment_sentence = "No clear investment amount found. Defaulted to $50M."
@@ -95,33 +94,11 @@ def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4, c
 # --- Streamlit UI ---
 st.set_page_config(page_title="PAD Job Analyzer", layout="wide")
 
-# --- Custom Styling ---
-st.markdown("""
-    <style>
-        html, body {
-            background-color: #f5f9ff;
-        }
-        h1, h2, h3 {
-            color: #86A5A5;
-        }
-        .stButton>button, .stDownloadButton>button {
-            background-color: #86A5A5;
-            color: white;
-            border-radius: 6px;
-            padding: 0.6em 1.2em;
-            font-weight: 600;
-            font-size: 1rem;
-        }
-        .stMarkdown {
-            font-size: 1.05rem;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
 # --- Logo ---
 st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png", width=150)
 
-st.title("📄 PAD Job Creation Analyzer")
+# --- Title with inline style ---
+st.markdown('<h1 style="color:#86A5A5;">📄 PAD Job Creation Analyzer</h1>', unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("Upload a PAD PDF", type="pdf")
 
@@ -131,16 +108,16 @@ if uploaded_file:
 
     results = estimate_jobs(full_text)
 
-    st.markdown("## 📊 Job Creation Estimate")
-    st.markdown(f"**Sector:** {results['sector'].capitalize()}")
-    st.markdown(f"**Investment Estimate:** ${results['investment_estimate_million_usd']:.2f} million")
-    st.markdown(f"**Confidence Level:** {results['confidence']}")
+    st.markdown('<h2 style="color:#86A5A5;">📊 Job Creation Estimate</h2>', unsafe_allow_html=True)
+    st.markdown(f"<b>Sector:</b> {results['sector'].capitalize()}", unsafe_allow_html=True)
+    st.markdown(f"<b>Investment Estimate:</b> ${results['investment_estimate_million_usd']:.2f} million", unsafe_allow_html=True)
+    st.markdown(f"<b>Confidence Level:</b> {results['confidence']}", unsafe_allow_html=True)
 
-    st.markdown(f"**Direct Jobs:** {results['direct_jobs']}")
-    st.info(results["direct_explanation"])
+    st.markdown(f"<b>Direct Jobs:</b> {results['direct_jobs']}", unsafe_allow_html=True)
+    st.markdown(f"<div style='background-color:#e6f2f2;padding:1em;border-left:4px solid #86A5A5;'>{results['direct_explanation']}</div>", unsafe_allow_html=True)
 
-    st.markdown(f"**Indirect Jobs:** {results['indirect_jobs']}")
-    st.info(results["indirect_explanation"])
+    st.markdown(f"<b>Indirect Jobs:</b> {results['indirect_jobs']}", unsafe_allow_html=True)
+    st.markdown(f"<div style='background-color:#e6f2f2;padding:1em;border-left:4px solid #86A5A5;'>{results['indirect_explanation']}</div>", unsafe_allow_html=True)
 
     tags = []
     if results["better_jobs"]:
@@ -148,17 +125,17 @@ if uploaded_file:
     if results["more_jobs"]:
         tags.append("🔵 More Jobs (job creation, MSMEs, labor demand)")
     if tags:
-        st.markdown("### 🏷️ Additional Job Dimensions")
+        st.markdown('<h3 style="color:#86A5A5;">🏷️ Additional Job Dimensions</h3>', unsafe_allow_html=True)
         for tag in tags:
             st.success(tag)
 
-    st.markdown("### 📌 Source Evidence")
-    st.markdown(f"**Investment Reference:** _{results['investment_sentence'].strip()}_")
+    st.markdown('<h3 style="color:#86A5A5;">📌 Source Evidence</h3>', unsafe_allow_html=True)
+    st.markdown(f"<b>Investment Reference:</b> <i>{results['investment_sentence'].strip()}</i>", unsafe_allow_html=True)
     if results["sector_sentence"]:
-        st.markdown(f"**Sector Reference:** _{results['sector_sentence'].strip()}_")
-    st.markdown(f"**Quoted Source Text:** > _{results['source_quote']}_")
+        st.markdown(f"<b>Sector Reference:</b> <i>{results['sector_sentence'].strip()}</i>", unsafe_allow_html=True)
+    st.markdown(f"<b>Quoted Source Text:</b><br><blockquote>{results['source_quote']}</blockquote>", unsafe_allow_html=True)
 
-    st.markdown("### 💾 Download Results")
+    st.markdown('<h3 style="color:#86A5A5;">💾 Download Results</h3>', unsafe_allow_html=True)
     df = pd.DataFrame([results])
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
