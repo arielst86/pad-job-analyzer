@@ -139,41 +139,4 @@ st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_l
 st.markdown('<div class="title">PAD Job Creation Analyzer</div>', unsafe_allow_html=True)
 
 # --- File Upload ---
-uploaded_file = st.file_uploader("Upload a PAD PDF", type="pdf")
-
-if uploaded_file:
-    reader = PyPDF2.PdfReader(uploaded_file)
-    full_text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
-
-    results = estimate_jobs(full_text)
-
-    st.markdown('<div class="section">Job Creation Estimate</div>', unsafe_allow_html=True)
-    st.markdown(f"**Sector:** {results['sector'].capitalize()}")
-    st.markdown(f"**Investment Estimate:** ${results['investment_estimate_million_usd']:.2f} million")
-    st.markdown(f"**Confidence Level:** {results['confidence']}")
-
-    st.markdown(f"**Direct Jobs:** {results['direct_jobs']}")
-    st.markdown(f"<div class='info-box'>{results['direct_explanation']}</div>", unsafe_allow_html=True)
-
-    st.markdown(f"**Indirect Jobs:** {results['indirect_jobs']}")
-    st.markdown(f"<div class='info-box'>{results['indirect_explanation']}</div>", unsafe_allow_html=True)
-
-    if results["better_jobs"] or results["more_jobs"]:
-        st.markdown('<div class="section">Additional Job Dimensions</div>', unsafe_allow_html=True)
-        if results["better_jobs"]:
-            st.info("Better Jobs: skills, training, labor standards")
-        if results["more_jobs"]:
-            st.info("More Jobs: job creation, MSMEs, labor demand")
-
-    st.markdown('<div class="section">Source Evidence</div>', unsafe_allow_html=True)
-    st.markdown(f"**Investment Reference:** *{results['investment_sentence'].strip()}*")
-    if results["sector_sentence"]:
-        st.markdown(f"**Sector Reference:** *{results['sector_sentence'].strip()}*")
-    st.markdown(f"**Quoted Source Text:**\n> {results['source_quote']}")
-
-    st.markdown('<div class="section">Download Results</div>', unsafe_allow_html=True)
-    df = pd.DataFrame([results])
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Job Estimate')
-    st.download_button("Download as Excel", data=output.getvalue(), file_name="job_estimate.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+uploaded_file
