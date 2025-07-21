@@ -28,7 +28,10 @@ def estimate_jobs(text):
     sector = next((s for s in sector_weights if s in text), "general")
     multiplier = sector_weights.get(sector, 1.0)
 
-    # Improved investment amount detection (dollar sign optional)
+    # --- Investment-based heuristic ---
+    amount = None
+
+    # Try matching "$300 million", "300 million", etc.
     match = re.search(r"(?:\$)?\s?([\d,]+\.?\d*)\s?(million|billion)", text)
     if match:
         try:
@@ -36,9 +39,19 @@ def estimate_jobs(text):
             if match.group(2).lower() == "billion":
                 amount *= 1000
         except (ValueError, IndexError):
-            amount = 50
-            st.warning("Could not parse investment amount. Using default estimate of $50M.")
-    else:
+            amount = None
+
+    # Fallback: match "Total Project Cost" followed by a number
+    if amount is None:
+        match_alt = re.search(r"total project cost\s*[:\-]?\s*([\d,]+\.?\d*)", text)
+        if match_alt:
+            try:
+                amount = float(match_alt.group(1).replace(",", ""))
+            except ValueError:
+                amount = None
+
+    # Final fallback
+    if amount is None:
         amount = 50
         st.warning("Could not detect investment amount in the text. Using default estimate of $50M.")
 
