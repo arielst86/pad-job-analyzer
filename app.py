@@ -35,7 +35,8 @@ def estimate_jobs(text):
         if match.group(2) == "billion":
             amount *= 1000
     else:
-        amount = 50  # default guess in millions
+    # fallback value if no match is found
+    amount = 106.25  # or any default you prefer
 
     base_jobs = amount * 10  # 10 jobs per million as a base
     direct_jobs = int(base_jobs * 0.6 * multiplier)
