@@ -106,7 +106,7 @@ WB_COLORS = {
 st.markdown(
     f"""
     <style>
-        html, body {{
+        section.main {{
             background-color: {WB_COLORS['background']};
             color: {WB_COLORS['text']};
             font-family: 'Segoe UI', sans-serif;
