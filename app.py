@@ -110,23 +110,32 @@ st.markdown("""
         }
         .block-container {
             padding-top: 2rem;
+            padding-bottom: 2rem;
         }
-        h1 {
+        h1, h2, h3, h4 {
             color: #003f6f;
         }
-        .stButton>button {
-            background-color: #0072bc;
+        .stButton>button, .stDownloadButton>button {
+            background-color: #0072BC;
             color: white;
+            border-radius: 6px;
+            padding: 0.6em 1.2em;
+            font-weight: 600;
+            font-size: 1rem;
         }
-        .stDownloadButton>button {
-            background-color: #0072bc;
-            color: white;
+        .stMarkdown {
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .stInfo {
+            background-color: #e6f2fa;
+            border-left: 4px solid #0072BC;
+            padding: 1em;
         }
     </style>
 """, unsafe_allow_html=True)
 
 # --- Logo ---
-st.image("https://www.worldbank.org/content/dam/wbr/logo/logo-wbg-header-en.svg", width=300)
+st.image("https://www.worldbank.org/content/dam/wbr/brand-assets/logo-wbg-en.png", width=250)
 
 st.title("📄 PAD Job Creation Analyzer")
 
