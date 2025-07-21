@@ -1,3 +1,6 @@
+
+st.markdown('<h1 style="color:red;">TEST HEADER</h1>', unsafe_allow_html=True)
+
 import streamlit as st
 import PyPDF2
 import re
