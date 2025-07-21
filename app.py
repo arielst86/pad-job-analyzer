@@ -134,9 +134,17 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- Header ---
-st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png", width=150)
-st.markdown('<div class="title">PAD Job Creation Analyzer</div>', unsafe_allow_html=True)
+
+# --- Header with Top-Right Image ---
+st.markdown(
+    f"""
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="title">PAD Job Creation Analyzer</div>
+        https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 # --- File Uploads ---
 col1, col2 = st.columns(2)
