@@ -140,7 +140,7 @@ st.markdown(
     f"""
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <div class="title">PAD Job Creation Analyzer</div>
-        https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png
+        https://brandlogos.net/world-bank-logo-vector-95478.html#google_vignette
     </div>
     """,
     unsafe_allow_html=True
