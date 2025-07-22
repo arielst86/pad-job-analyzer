@@ -185,3 +185,46 @@ if uploaded_file:
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Job Estimate')
     st.download_button("Download as Excel", data=output.getvalue(), file_name="job_estimate.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+# --- Real-Time Projects Section ---
+def fetch_live_projects(sector):
+    """
+    Fetch live (active) projects from the World Bank API for the given sector.
+    """
+    base_url = "https://search.worldbank.org/api/v2/projects"
+    params = {
+        "format": "json",
+        "statuscode_exact": "A",  # Active projects
+        "sectorname": sector,
+        "rows": 100
+    }
+
+    try:
+        response = requests.get(base_url, params=params)
+        data = response.json()
+        projects = data.get("projects", {}).values()
+        live_projects = []
+
+        for project in projects:
+            live_projects.append({
+                "Project Name": project.get("project_name", "Unnamed"),
+                "Country": project.get("countryshortname", "Unknown"),
+                "P-Code": project.get("id", ""),
+                "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
+                "Total Commitment (USD)": float(project.get("totalcommamt", 0)) / 1_000_000
+            })
+
+        return pd.DataFrame(live_projects)
+    except Exception as e:
+        st.error(f"Failed to fetch live projects: {e}")
+        return pd.DataFrame()
+
+# --- Display Live Projects ---
+if results["sector"] != "general":
+    st.subheader("Live Projects in the Same Sector")
+    live_df = fetch_live_projects(results["sector"])
+    if not live_df.empty:
+        st.dataframe(live_df)
+    else:
+        st.info("No live projects found for this sector.")
+
