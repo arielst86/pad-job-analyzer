@@ -205,33 +205,22 @@ def fetch_live_projects(sector):
         projects = data.get("projects", {}).values()
         live_projects = []
 
-
-for project in projects:
-    try:
-        commitment_str = str(project.get("totalcommamt", "0")).replace(",", "")
-        commitment = float(commitment_str) / 1_000_000
-        live_projects.append({
-            "Project Name": project.get("project_name", "Unnamed"),
-            "Country": project.get("countryshortname", "Unknown"),
-            "P-Code": project.get("id", ""),
-            "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
-            "Total Commitment (USD)": commitment
-        })
-    except ValueError:
-        continue
-
+        for project in projects:
+            try:
+                commitment_str = str(project.get("totalcommamt", "0")).replace(",", "")
+                commitment = float(commitment_str) / 1_000_000
+                live_projects.append({
+                    "Project Name": project.get("project_name", "Unnamed"),
+                    "Country": project.get("countryshortname", "Unknown"),
+                    "P-Code": project.get("id", ""),
+                    "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
+                    "Total Commitment (USD)": commitment
+                })
+            except ValueError:
+                continue  # Skip projects with invalid commitment values
 
         return pd.DataFrame(live_projects)
+
     except Exception as e:
         st.error(f"Failed to fetch live projects: {e}")
         return pd.DataFrame()
-
-# --- Display Live Projects ---
-if results["sector"] != "general":
-    st.subheader("Live Projects in the Same Sector")
-    live_df = fetch_live_projects(results["sector"])
-    if not live_df.empty:
-        st.dataframe(live_df)
-    else:
-        st.info("No live projects found for this sector.")
-
