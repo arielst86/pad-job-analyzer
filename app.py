@@ -227,15 +227,78 @@ def fetch_live_projects(sector):
         return pd.DataFrame()
 
 # --- Display Live Projects ---
-if uploaded_file:
-    # ... your existing code for reading and analyzing the PAD ...
+# --- Real-Time Projects Section ---
+def fetch_live_projects(sector, require_jobs=True):
+    """
+    Fetch live (active) projects from the World Bank API for the given sector.
+    If require_jobs is True, only include projects that mention jobs in the results framework.
+    """
+    import re
 
-    # Show live projects if sector is identified
-    if results["sector"] and results["sector"] != "general":
-        st.subheader("Live Projects in the Same Sector")
-        st.write(f"Fetching live projects for sector: **{results['sector'].capitalize()}**")
-        live_df = fetch_live_projects(results["sector"])
-        if not live_df.empty:
-            st.dataframe(live_df)
-        else:
-            st.info("No live projects found for this sector.")
+    base_url = "https://search.worldbank.org/api/v2/projects"
+    params = {
+        "format": "json",
+        "statuscode_exact": "A",  # Active projects
+        "sectorname": sector,
+        "rows": 100
+    }
+
+    try:
+        response = requests.get(base_url, params=params)
+        data = response.json()
+        projects = data.get("projects", {}).values()
+        live_projects = []
+
+        for project in projects:
+            rf = project.get("resultsframework", "")
+            jobs_mentioned = None
+
+            if rf:
+                job_match = re.search(r"(\d[\d,]*)\s+(?:jobs|employment|positions|created|added)", rf.lower())
+                if job_match:
+                    try:
+                        jobs_mentioned = int(job_match.group(1).replace(",", ""))
+                    except ValueError:
+                        jobs_mentioned = None
+
+            # Skip if jobs are required but not found
+            if require_jobs and jobs_mentioned is None:
+                continue
+
+            try:
+                commitment_str = str(project.get("totalcommamt", "0")).replace(",", "")
+                commitment = float(commitment_str) / 1_000_000
+                live_projects.append({
+                    "Project Name": project.get("project_name", "Unnamed"),
+                    "Country": project.get("countryshortname", "Unknown"),
+                    "P-Code": project.get("id", ""),
+                    "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
+                    "Total Commitment (USD)": commitment,
+                    "Jobs Mentioned": jobs_mentioned if jobs_mentioned is not None else "N/A"
+                })
+            except ValueError:
+                continue
+
+        return pd.DataFrame(live_projects)
+
+    except Exception as e:
+        st.error(f"Failed to fetch live projects: {e}")
+        return pd.DataFrame()
+
+# --- Display Live Projects ---
+if results["sector"] and results["sector"] != "general":
+    st.subheader("Live Projects in the Same Sector")
+    st.write(f"Fetching live projects for sector: **{results['sector'].capitalize()}**")
+
+    live_df = fetch_live_projects(results["sector"], require_jobs=True)
+
+    if not live_df.empty:
+        st.dataframe(live_df)
+    else:
+        st.info("No live projects found that mention jobs in the results framework.")
+        if st.checkbox("Show all live projects in this sector instead?"):
+            all_live_df = fetch_live_projects(results["sector"], require_jobs=False)
+            if not all_live_df.empty:
+                st.dataframe(all_live_df)
+            else:
+                st.warning("No live projects found at all for this sector.")
