@@ -286,75 +286,19 @@ def fetch_live_projects(sector, require_jobs=True):
         return pd.DataFrame()
 
 # --- Display Live Projects ---
-import requests
-import re
+if results["sector"] and results["sector"] != "general":
+    st.subheader("Live Projects in the Same Sector")
+    st.write(f"Fetching live projects for sector: **{results['sector'].capitalize()}**")
 
-def fetch_project_results_from_opsportal(project_id):
-    """
-    Fetch job-related PDO results from the World Bank Operations Portal for a given project ID.
-    """
-    url = f"https://opsportal.worldbank.org/operations/{project_id}/CORE01/results-pp/pdo"
-    headers = {"Accept": "application/json"}
+    live_df = fetch_live_projects(results["sector"], require_jobs=True)
 
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-
-        for result in data.get("results", []):
-            indicator = result.get("indicator", "").lower()
-            if any(k in indicator for k in ["job", "employment", "labor", "livelihood"]):
-                actual = result.get("actualValue", "")
-                match = re.search(r"\d[\d,]*", str(actual))
-                if match:
-                    return int(match.group(0).replace(",", ""))
-        return "N/A"
-    except:
-        return "N/A"
-
-def fetch_live_projects(sector, require_jobs=True):
-    """
-    Fetch live (active) projects from the World Bank legacy API for the given sector,
-    and enrich them with job-related results from the Operations Portal.
-    """
-    base_url = "https://search.worldbank.org/api/v2/projects"
-    params = {
-        "format": "json",
-        "statuscode_exact": "A",  # Active projects
-        "sectorname": sector,
-        "rows": 100
-    }
-
-    try:
-        response = requests.get(base_url, params=params)
-        data = response.json()
-        projects = data.get("projects", {}).values()
-        live_projects = []
-
-        for project in projects:
-            try:
-                project_id = project.get("id", "")
-                commitment_str = str(project.get("totalcommamt", "0")).replace(",", "")
-                commitment = float(commitment_str) / 1_000_000
-
-                jobs_mentioned = fetch_project_results_from_opsportal(project_id)
-
-                if require_jobs and (jobs_mentioned == "N/A" or jobs_mentioned == 0):
-                    continue
-
-                live_projects.append({
-                    "Project Name": project.get("project_name", "Unnamed"),
-                    "Country": project.get("countryshortname", "Unknown"),
-                    "P-Code": project_id,
-                    "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
-                    "Total Commitment (USD)": commitment,
-                    "Jobs Mentioned": jobs_mentioned
-                })
-            except Exception:
-                continue
-
-        return pd.DataFrame(live_projects)
-
-    except Exception as e:
-        st.error(f"Failed to fetch live projects: {e}")
-        return pd.DataFrame()
+    if not live_df.empty:
+        st.dataframe(live_df)
+    else:
+        st.info("No live projects found that mention jobs in the results framework.")
+        if st.checkbox("Show all live projects in this sector instead?"):
+            all_live_df = fetch_live_projects(results["sector"], require_jobs=False)
+            if not all_live_df.empty:
+                st.dataframe(all_live_df)
+            else:
+                st.warning("No live projects found at all for this sector.")
