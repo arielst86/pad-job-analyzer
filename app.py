@@ -227,15 +227,49 @@ def fetch_live_projects(sector):
         return pd.DataFrame()
 
 # --- Display Live Projects ---
-if uploaded_file:
-    # ... your existing code for reading and analyzing the PAD ...
+def fetch_live_projects(sector):
+    """
+    Fetch live (active) projects from the World Bank API for the given sector,
+    filtering for those that mention jobs in the results framework.
+    """
+    import re
 
-    # Show live projects if sector is identified
-    if results["sector"] and results["sector"] != "general":
-        st.subheader("Live Projects in the Same Sector")
-        st.write(f"Fetching live projects for sector: **{results['sector'].capitalize()}**")
-        live_df = fetch_live_projects(results["sector"])
-        if not live_df.empty:
-            st.dataframe(live_df)
-        else:
-            st.info("No live projects found for this sector.")
+    base_url = "https://search.worldbank.org/api/v2/projects"
+    params = {
+        "format": "json",
+        "statuscode_exact": "A",  # Active projects
+        "sectorname": sector,
+        "rows": 100
+    }
+
+    try:
+        response = requests.get(base_url, params=params)
+        data = response.json()
+        projects = data.get("projects", {}).values()
+        live_projects = []
+
+        for project in projects:
+            rf = project.get("resultsframework", "")
+            if rf:
+                job_match = re.search(r"(\d{1,3}(?:,\d{3})*)\s+(?:jobs|employment|positions)", rf.lower())
+                if job_match:
+                    try:
+                        commitment_str = str(project.get("totalcommamt", "0")).replace(",", "")
+                        commitment = float(commitment_str) / 1_000_000
+                        jobs_mentioned = int(job_match.group(1).replace(",", ""))
+                        live_projects.append({
+                            "Project Name": project.get("project_name", "Unnamed"),
+                            "Country": project.get("countryshortname", "Unknown"),
+                            "P-Code": project.get("id", ""),
+                            "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
+                            "Total Commitment (USD)": commitment,
+                            "Jobs Mentioned": jobs_mentioned
+                        })
+                    except ValueError:
+                        continue  # Skip if commitment or job number can't be parsed
+
+        return pd.DataFrame(live_projects)
+
+    except Exception as e:
+        st.error(f"Failed to fetch live projects: {e}")
+        return pd.DataFrame()
