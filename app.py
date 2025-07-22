@@ -187,6 +187,7 @@ if uploaded_file:
     st.download_button("Download as Excel", data=output.getvalue(), file_name="job_estimate.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # --- Real-Time Projects Section ---
+# --- Real-Time Projects Section ---
 def fetch_live_projects(sector):
     """
     Fetch live (active) projects from the World Bank API for the given sector.
@@ -224,3 +225,17 @@ def fetch_live_projects(sector):
     except Exception as e:
         st.error(f"Failed to fetch live projects: {e}")
         return pd.DataFrame()
+
+# --- Display Live Projects ---
+if uploaded_file:
+    # ... your existing code for reading and analyzing the PAD ...
+
+    # Show live projects if sector is identified
+    if results["sector"] and results["sector"] != "general":
+        st.subheader("Live Projects in the Same Sector")
+        st.write(f"Fetching live projects for sector: **{results['sector'].capitalize()}**")
+        live_df = fetch_live_projects(results["sector"])
+        if not live_df.empty:
+            st.dataframe(live_df)
+        else:
+            st.info("No live projects found for this sector.")
