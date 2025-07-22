@@ -205,14 +205,21 @@ def fetch_live_projects(sector):
         projects = data.get("projects", {}).values()
         live_projects = []
 
-        for project in projects:
-            live_projects.append({
-                "Project Name": project.get("project_name", "Unnamed"),
-                "Country": project.get("countryshortname", "Unknown"),
-                "P-Code": project.get("id", ""),
-                "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
-                "Total Commitment (USD)": float(project.get("totalcommamt", 0)) / 1_000_000
-            })
+
+for project in projects:
+    try:
+        commitment_str = str(project.get("totalcommamt", "0")).replace(",", "")
+        commitment = float(commitment_str) / 1_000_000
+        live_projects.append({
+            "Project Name": project.get("project_name", "Unnamed"),
+            "Country": project.get("countryshortname", "Unknown"),
+            "P-Code": project.get("id", ""),
+            "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
+            "Total Commitment (USD)": commitment
+        })
+    except ValueError:
+        continue
+
 
         return pd.DataFrame(live_projects)
     except Exception as e:
