@@ -5,300 +5,492 @@ import pandas as pd
 import requests
 import altair as alt
 from io import BytesIO
+from typing import Tuple, Dict, List, Any, Optional
 
-# --- Estimate Jobs from Description ---
-def estimate_jobs_created(description):
-    keywords = ["employment", "job", "labor", "workforce", "hiring", "recruitment", "livelihood", "skills", "training"]
-    score = sum(description.lower().count(k) for k in keywords)
-    return score * 100  # Simple multiplier
-
-# --- Fetch Equivalent Projects (Merged Logic) ---
-def fetch_equivalent_projects(sector, net_commitment_million, tolerance=0.25):
-    base_url = "https://search.worldbank.org/api/v2/projects"
-    params = {
-        "format": "json",
-        "statuscode_exact": "C",  # Closed projects
-        "sector_exact": sector,
-        "rows": 1000
-    }
-
-    try:
-        response = requests.get(base_url, params=params)
-        data = response.json()
-        projects = data.get("projects", {}).values()
-        similar_projects = []
-
-        for project in projects:
-            try:
-                commitment = float(project.get("totalcommamt", 0)) / 1_000_000
-                if abs(commitment - net_commitment_million) / net_commitment_million <= tolerance:
-                    description = project.get("project_abstract", {}).get("cdata", "")
-                    similar_projects.append({
-                        "Project Name": project.get("project_name", "Unnamed"),
-                        "Country": project.get("countryshortname", "Unknown"),
-                        "P-Code": project.get("id"),
-                        "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
-                        "Jobs Created": estimate_jobs_created(description),
-                        "Similarity": "Same sector, similar net commitment, closed"
-                    })
-            except (TypeError, ValueError):
-                continue
-
-        return similar_projects
-    except Exception as e:
-        print("API error:", e)
-        return []
-
-# --- Job Estimation Logic ---
-def estimate_jobs(text, jobs_per_million=10, direct_pct=0.6, indirect_pct=0.4):
-    text = text.lower()
-
-    sector_weights = {
-        "infrastructure": 1.5,
-        "education": 1.2,
-        "health": 1.3,
-        "agriculture": 1.4,
-        "digital": 1.1
-    }
-    sector = "general"
-    sector_sentence = ""
-    for s in sector_weights:
-        if s in text:
-            sector = s
-            match = re.search(rf"([^.]*\b{s}\b[^.]*)", text)
-            if match:
-                sector_sentence = match.group(1)
-            break
-    multiplier = sector_weights.get(sector, 1.0)
-
-    match = re.search(r"(?:\$)?\s?([\d,]+\.?\d*)\s?(million|billion)", text)
-    amount = None
-    investment_sentence = ""
-    if match:
-        try:
-            amount = float(match.group(1).replace(",", ""))
-            if match.group(2).lower() == "billion":
-                amount *= 1000
-            investment_sentence = match.group(0)
-        except:
-            pass
-    if amount is None:
-        amount = 50
-        investment_sentence = "No clear investment amount found. Defaulted to $50M."
-        confidence = "Low"
-    else:
-        confidence = "High" if sector != "general" else "Medium"
-
-    base_jobs = amount * jobs_per_million
-    direct_jobs = int(base_jobs * direct_pct * multiplier)
-    indirect_jobs = int(base_jobs * indirect_pct * multiplier)
-
-    better_keywords = ["skills", "training", "capacity building", "labor standards"]
-    better_jobs_flag = any(k in text for k in better_keywords)
-    better_direct_jobs = int(direct_jobs * 0.3) if better_jobs_flag else 0
-    better_indirect_jobs = int(indirect_jobs * 0.2) if better_jobs_flag else 0
-    quote_match = re.search(r"([^.]*?(?:job creation|employment|labor|msmes|skills|training)[^.]*\.)", text)
-    source_quote = quote_match.group(1).strip() if quote_match else "No specific quote found."
-
-    equivalent_projects = fetch_equivalent_projects(sector, amount)
-
-    return {
-        "sector": sector,
-        "investment_estimate_million_usd": amount,
-        "direct_jobs": direct_jobs,
-        "indirect_jobs": indirect_jobs,
-        "better_direct_jobs": better_direct_jobs,
-        "better_indirect_jobs": better_indirect_jobs,
-        "investment_sentence": investment_sentence,
-        "sector_sentence": sector_sentence,
-        "confidence": confidence,
-        "source_quote": source_quote,
-        "equivalent_projects": equivalent_projects
-    }
-
-# --- Streamlit UI ---
-st.set_page_config(page_title="PAD Job Analyzer", layout="wide")
+# -----------------------------
+# Streamlit Config & Header
+# -----------------------------
+st.set_page_config(page_title="PAD Job Analyzer", layout="wide", page_icon="📄")
 
 st.markdown(
     """
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div style="font-size: 2.5em; font-weight: bold; color: #003366;">PAD Job Creation Analyzer</div>
-        https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png
-    </div>
-    """,
-    unsafe_allow_html=True
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+        <div style="font-size:2.0em;font-weight:700;color:#003366;">PAD Job Creation Analyzer</div>
+        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/World_Bank_logo.svg/512px-World_Bank_logo.svg.png"
+             unsafe_allow_html=True
 )
 
-uploaded_file = st.file_uploader("Upload a PAD PDF", type="pdf")
+# -----------------------------
+# Sidebar Controls (Sensitivity)
+# -----------------------------
+with st.sidebar:
+    st.header("Assumptions & Sensitivity")
+    jobs_per_million = st.slider("Base jobs per US$1M", min_value=1, max_value=100, value=10, step=1)
+    direct_pct = st.slider("Direct jobs share", min_value=0.1, max_value=0.9, value=0.6, step=0.05)
+    indirect_pct = 1.0 - direct_pct
+    st.caption(f"Indirect share = {indirect_pct:.2f}")
+
+    st.divider()
+    st.subheader("Sector Multipliers")
+    sector_multipliers = {
+        "Education": st.slider("Education", 0.3, 3.0, 1.2, 0.1),
+        "Health": st.slider("Health", 0.3, 3.0, 1.3, 0.1),
+        "Agriculture and Food": st.slider("Agriculture and Food", 0.3, 3.0, 1.4, 0.1),
+        "Transport": st.slider("Transport", 0.3, 3.0, 1.5, 0.1),
+        "Energy & Extractives": st.slider("Energy & Extractives", 0.3, 3.0, 1.4, 0.1),
+        "Digital Development": st.slider("Digital Development", 0.3, 3.0, 1.1, 0.1),
+        "Other / General": st.slider("Other / General", 0.3, 3.0, 1.0, 0.1),
+    }
+
+    st.divider()
+    st.subheader("Better Jobs Settings")
+    better_direct_share = st.slider("Share of direct jobs considered 'better'", 0.0, 0.8, 0.30, 0.05)
+    better_indirect_share = st.slider("Share of indirect jobs considered 'better'", 0.0, 0.8, 0.20, 0.05)
+
+    st.divider()
+    st.subheader("Estimate Uncertainty")
+    plus_minus_pct = st.slider("Result ± uncertainty (%)", 0, 100, 20, 5)
+
+# -----------------------------
+# Helpers
+# -----------------------------
+
+def clean_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+def extract_text_from_pdf(uploaded_file) -> str:
+    reader = PyPDF2.PdfReader(uploaded_file)
+    pages = []
+    for page in reader.pages:
+        try:
+            t = page.extract_text()
+            if t:
+                pages.append(t)
+        except Exception:
+            continue
+    return "\n".join(pages)
+
+# Map free-text hits to WB-like sector names we can query
+SECTOR_MAP = {
+    "education": "Education",
+    "school": "Education",
+    "skills": "Education",
+    "health": "Health",
+    "hospital": "Health",
+    "agriculture": "Agriculture and Food",
+    "agricultural": "Agriculture and Food",
+    "rural": "Agriculture and Food",
+    "transport": "Transport",
+    "road": "Transport",
+    "highway": "Transport",
+    "rail": "Transport",
+    "energy": "Energy & Extractives",
+    "power": "Energy & Extractives",
+    "electricity": "Energy & Extractives",
+    "mining": "Energy & Extractives",
+    "digital": "Digital Development",
+    "ict": "Digital Development",
+    "connectivity": "Digital Development",
+}
+
+def detect_sector(text: str) -> Tuple[str, str]:
+    """
+    Return (sector_name_for_api, evidence_sentence)
+    Falls back to 'Other / General' if none matched.
+    """
+    txt = text.lower()
+    for k, v in SECTOR_MAP.items():
+        if k in txt:
+            # capture evidence sentence
+            m = re.search(rf"([^.]*\b{k}\b[^.]*)\.", text, flags=re.IGNORECASE)
+            return v, (m.group(1) + ".") if m else ""
+    return "Other / General", ""
+
+INV_PATTERNS = [
+    # US$ 120 million / USD 120 million / $120 million
+    r"(US\$|USD|\$)\s?([\d,]+(?:\.\d+)?)\s*(million|billion)",
+    # 120 million USD
+    r"([\d,]+(?:\.\d+)?)\s*(million|billion)\s*(US\$|USD|\$)",
+    # 120 million (no currency)
+    r"(?:amount|financing|cost|project cost|total financing|loan)\D{0,20}([\d,]+(?:\.\d+)?)\s*(million|billion)",
+]
+
+def parse_investment_amount_million(text: str) -> Tuple[Optional[float], str, str]:
+    """
+    Return (amount_in_million, confidence, snippet)
+    """
+    candidates = []
+    for pat in INV_PATTERNS:
+        for m in re.finditer(pat, text, flags=re.IGNORECASE):
+            num = m.group(2) if len(m.groups()) >= 2 else None
+            unit = m.group(3) if len(m.groups()) >= 3 else None
+            if num and unit:
+                try:
+                    val = float(num.replace(",", ""))
+                    unit = unit.lower()
+                    if "billion" in unit:
+                        val *= 1000.0
+                    candidates.append((val, m.group(0)))
+                except Exception:
+                    pass
+
+    if not candidates:
+        # fallback to any "<number> million" anywhere
+        m = re.search(r"([\d,]+(?:\.\d+)?)\s*(million|billion)", text, flags=re.IGNORECASE)
+        if m:
+            try:
+                val = float(m.group(1).replace(",", ""))
+                if m.group(2).lower() == "billion":
+                    val *= 1000.0
+                return val, "Medium (generic amount found)", m.group(0)
+            except Exception:
+                pass
+        return None, "Low (no clear amount found, default used)", "No clear investment amount found."
+
+    # Choose the most frequent or the largest (PAD often highlights total)
+    # Heuristic: take the max; show snippet.
+    best = max(candidates, key=lambda x: x[0])
+    # If multiple distinct values exist, reduce confidence
+    distinct_vals = {round(v, 2) for v, _ in candidates}
+    if len(distinct_vals) > 1:
+        return best[0], "Medium (multiple amounts detected)", best[1]
+    return best[0], "High", best[1]
+
+BETTER_JOB_KEYWORDS = {
+    "skills", "training", "apprentice", "capacity building",
+    "labor standards", "labour standards", "osh", "occupational safety",
+    "formalization", "formalisation", "compliance", "decent work",
+    "wage", "earnings", "productivity", "women", "female", "gender",
+    "youth employment", "social dialogue", "working conditions"
+}
+
+def detect_better_jobs_signals(text: str) -> List[str]:
+    txt = text.lower()
+    hits = [k for k in BETTER_JOB_KEYWORDS if k in txt]
+    # Deduplicate stems (e.g., wage/earnings both present)
+    return sorted(set(hits))
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def worldbank_projects_search(params: Dict[str, Any]) -> Dict[str, Any]:
+    base_url = "https://search.worldbank.org/api/v2/projects"
+    r = requests.get(base_url, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+def estimate_jobs_logic(
+    text: str,
+    jobs_per_million: float,
+    direct_pct: float,
+    sector_multipliers: Dict[str, float],
+    better_direct_share: float,
+    better_indirect_share: float
+) -> Dict[str, Any]:
+    text = text or ""
+    sector, sector_sentence = detect_sector(text)
+
+    amount_m, conf, amount_snip = parse_investment_amount_million(text)
+    used_default = False
+    if amount_m is None:
+        amount_m = 50.0
+        used_default = True
+
+    # Apply sector multiplier
+    mult = sector_multipliers.get(sector, sector_multipliers["Other / General"])
+
+    base_jobs = amount_m * jobs_per_million
+    direct_jobs = int(base_jobs * direct_pct * mult)
+    indirect_jobs = int(base_jobs * (1.0 - direct_pct) * mult)
+
+    # better jobs detection
+    better_hits = detect_better_jobs_signals(text)
+    better_flag = len(better_hits) > 0
+    better_direct = int(direct_jobs * better_direct_share) if better_flag else 0
+    better_indirect = int(indirect_jobs * better_indirect_share) if better_flag else 0
+
+    # Pull a relevant evidence quote
+    quote_match = re.search(
+        r"([^.]*\b(job creation|employment|labor|labour|msmes|skills|training|enterprise|firms)\b[^.]*\.)",
+        text, flags=re.IGNORECASE
+    )
+    source_quote = quote_match.group(1).strip() if quote_match else "No specific jobs/skills sentence found."
+
+    # Confidence assembly
+    overall_conf = "High"
+    if sector == "Other / General":
+        overall_conf = "Medium"
+    if used_default:
+        overall_conf = "Low"
+
+    return {
+        "sector": sector,
+        "investment_estimate_million_usd": float(round(amount_m, 2)),
+        "amount_confidence": conf,
+        "investment_snippet": amount_snip,
+        "sector_evidence": sector_sentence,
+        "direct_jobs": direct_jobs,
+        "indirect_jobs": indirect_jobs,
+        "better_direct_jobs": better_direct,
+        "better_indirect_jobs": better_indirect,
+        "better_jobs_signals": better_hits,
+        "confidence": overall_conf,
+        "source_quote": source_quote
+    }
+
+def estimate_uncertainty(value: int, pct: int) -> Tuple[int, int]:
+    lower = int(round(value * (1 - pct / 100)))
+    upper = int(round(value * (1 + pct / 100)))
+    return lower, upper
+
+def sector_query_value(sector: str) -> str:
+    return sector if sector != "Other / General" else ""
+
+def jobs_from_description_score(description: str) -> int:
+    """Keep your lightweight heuristic for charting similar projects when no explicit jobs numbers exist."""
+    keywords = ["employment", "job", "labor", "labour", "workforce", "hiring", "recruitment", "livelihood", "skills", "training"]
+    score = sum(description.lower().count(k) for k in keywords)
+    return score * 100
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_equivalent_projects(sector: str, net_commitment_million: float, tolerance: float = 0.25) -> pd.DataFrame:
+    params = {
+        "format": "json",
+        "statuscode_exact": "C",   # Closed
+        "rows": 2000
+    }
+    if sector_query_value(sector):
+        params["sectorname"] = sector_query_value(sector)
+
+    try:
+        data = worldbank_projects_search(params)
+        projects = list(data.get("projects", {}).values())
+    except Exception:
+        projects = []
+
+    rows = []
+    for p in projects:
+        try:
+            commitment = float(str(p.get("totalcommamt", "0")).replace(",", "")) / 1_000_000.0
+        except Exception:
+            continue
+        if net_commitment_million and net_commitment_million > 0:
+            rel = abs(commitment - net_commitment_million) / net_commitment_million
+            if rel > tolerance:
+                continue
+
+        description = ""
+        abs_ = p.get("project_abstract")
+        if isinstance(abs_, dict):
+            description = abs_.get("cdata", "") or ""
+        elif isinstance(abs_, str):
+            description = abs_
+
+        rows.append({
+            "Project Name": p.get("project_name", "Unnamed"),
+            "Country": p.get("countryshortname", "Unknown"),
+            "P-Code": p.get("id", ""),
+            "Dates": f"{(p.get('boardapprovaldate','') or '')[:10]} to {(p.get('closingdate','') or '')[:10]}",
+            "Est. Jobs (text score)": jobs_from_description_score(description),
+            "Total Commitment (US$M)": round(commitment, 2)
+        })
+    return pd.DataFrame(rows)
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_live_projects(sector: str, require_jobs: bool = True) -> pd.DataFrame:
+    """
+    Active projects; optionally filter to those that mention jobs in results framework.
+    """
+    params = {
+        "format": "json",
+        "statuscode_exact": "A",
+        "rows": 2000
+    }
+    if sector_query_value(sector):
+        params["sectorname"] = sector_query_value(sector)
+
+    try:
+        data = worldbank_projects_search(params)
+        projects = list(data.get("projects", {}).values())
+    except Exception:
+        projects = []
+
+    rows = []
+    for p in projects:
+        rf = p.get("resultsframework", "") or ""
+        jobs_mentioned = None
+        if isinstance(rf, str) and rf:
+            m = re.search(r"(\d[\d,]*)\s+(?:job[s]?|employment|position[s]?|created|added)", rf, flags=re.IGNORECASE)
+            if m:
+                try:
+                    jobs_mentioned = int(m.group(1).replace(",", ""))
+                except Exception:
+                    jobs_mentioned = None
+
+        if require_jobs and jobs_mentioned is None:
+            continue
+
+        try:
+            commitment = float(str(p.get("totalcommamt", "0")).replace(",", "")) / 1_000_000.0
+        except Exception:
+            commitment = 0.0
+
+        rows.append({
+            "Project Name": p.get("project_name", "Unnamed"),
+            "Country": p.get("countryshortname", "Unknown"),
+            "P-Code": p.get("id", ""),
+            "Dates": f"{(p.get('boardapprovaldate','') or '')[:10]} to {(p.get('closingdate','') or '')[:10]}",
+            "Total Commitment (US$M)": round(commitment, 2),
+            "Jobs Mentioned": jobs_mentioned if jobs_mentioned is not None else "N/A"
+        })
+
+    return pd.DataFrame(rows)
+
+# -----------------------------
+# File Uploader
+# -----------------------------
+uploaded_file = st.file_uploader("Upload a PAD PDF", type=["pdf"])
 
 if uploaded_file:
-    reader = PyPDF2.PdfReader(uploaded_file)
-    full_text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+    with st.spinner("Extracting text..."):
+        full_text = extract_text_from_pdf(uploaded_file)
+        full_text_clean = clean_text(full_text)
 
-    results = estimate_jobs(full_text)
+    with st.spinner("Estimating jobs..."):
+        results = estimate_jobs_logic(
+            full_text_clean,
+            jobs_per_million=jobs_per_million,
+            direct_pct=direct_pct,
+            sector_multipliers=sector_multipliers,
+            better_direct_share=better_direct_share,
+            better_indirect_share=better_indirect_share
+        )
 
     st.subheader("Job Creation Estimate")
-    st.markdown(f"**Sector:** {results['sector'].capitalize()}")
-    st.markdown(f"**Investment Estimate:** ${results['investment_estimate_million_usd']:.2f} million")
-    st.markdown(f"**Confidence Level:** {results['confidence']}")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Sector", results["sector"])
+        st.caption(results["sector_evidence"] or "No sector evidence sentence found.")
+    with col2:
+        st.metric("Investment (US$M)", f"{results['investment_estimate_million_usd']:.2f}")
+        st.caption(f"{results['amount_confidence']} — “{results['investment_snippet']}”")
+    with col3:
+        st.metric("Confidence", results["confidence"])
+        st.caption("Based on sector detection and investment parsing.")
 
-    st.markdown(f"**Direct Jobs:** {results['direct_jobs']}")
-    st.markdown(f"**Estimated Better Direct Jobs:** {results['better_direct_jobs']}")
-    st.markdown(f"**Indirect Jobs:** {results['indirect_jobs']}")
-    st.markdown(f"**Estimated Better Indirect Jobs:** {results['better_indirect_jobs']}")
+    # Direct / Indirect with uncertainty bands
+    dj_low, dj_high = estimate_uncertainty(results["direct_jobs"], plus_minus_pct)
+    ij_low, ij_high = estimate_uncertainty(results["indirect_jobs"], plus_minus_pct)
 
+    st.markdown("### Jobs Breakdown")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"**Direct Jobs:** {results['direct_jobs']:,} (±{plus_minus_pct}% → {dj_low:,}–{dj_high:,})")
+        st.markdown(f"**Better Direct Jobs:** {results['better_direct_jobs']:,}")
+    with c2:
+        st.markdown(f"**Indirect Jobs:** {results['indirect_jobs']:,} (±{plus_minus_pct}% → {ij_low:,}–{ij_high:,})")
+        st.markdown(f"**Better Indirect Jobs:** {results['better_indirect_jobs']:,}")
+
+    # Evidence
     st.subheader("Source Evidence")
-    st.markdown(f"**Investment Reference:** *{results['investment_sentence']}*")
-    if results["sector_sentence"]:
-        st.markdown(f"**Sector Reference:** *{results['sector_sentence']}*")
-    st.markdown(f"**Quoted Source Text:**\n> {results['source_quote']}")
+    st.markdown(f"**Quoted Text:**\n> {results['source_quote']}")
+    if results["better_jobs_signals"]:
+        st.info("**Better Jobs Signals Detected:** " + ", ".join(results["better_jobs_signals"]))
+    else:
+        st.info("No better-jobs signals detected; set to 0 by current rules.")
 
-    if results["equivalent_projects"]:
-        st.subheader("Equivalent Projects")
-        eq_df = pd.DataFrame(results["equivalent_projects"])
-        st.dataframe(eq_df)
+    # Equivalent (closed) projects
+    st.subheader("Comparable Closed Projects (Same/Similar Sector & Size)")
+    eq_df = fetch_equivalent_projects(results["sector"], results["investment_estimate_million_usd"], tolerance=0.25)
+    if not eq_df.empty:
+        st.dataframe(eq_df, use_container_width=True)
 
-        # --- Altair Chart ---
-        st.subheader("Job Creation in Equivalent Projects")
-        chart_data = eq_df[["Project Name", "Jobs Created"]].copy()
-        chart_data = chart_data[chart_data["Jobs Created"] != "N/A"]
-        chart_data["Jobs Created"] = pd.to_numeric(chart_data["Jobs Created"], errors="coerce")
-        chart_data = chart_data.dropna()
+        # Chart
+        chart_data = eq_df[["Project Name", "Est. Jobs (text score)"]].copy()
+        chart_data = chart_data[chart_data["Est. Jobs (text score)"] > 0]
 
         if not chart_data.empty:
-            chart = alt.Chart(chart_data).mark_bar().encode(
-                x=alt.X("Jobs Created:Q", title="Estimated Jobs Created"),
-                y=alt.Y("Project Name:N", sort='-x', title="Project"),
-                tooltip=["Project Name", "Jobs Created"]
-            ).properties(
-                width=700,
-                height=400,
-                title="Estimated Jobs Created in Equivalent Projects"
+            chart = (
+                alt.Chart(chart_data)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Est. Jobs (text score):Q", title="Estimated Jobs (heuristic score)"),
+                    y=alt.Y("Project Name:N", sort='-x', title="Project"),
+                    tooltip=["Project Name", "Est. Jobs (text score)"]
+                )
+                .properties(height=400)
             )
             st.altair_chart(chart, use_container_width=True)
         else:
-            st.info("No job creation data available for charting.")
+            st.info("No comparable projects with text-based job signals.")
+    else:
+        st.info("No comparable closed projects found for the chosen filters.")
 
-    st.subheader("Download Results")
-    df = pd.DataFrame([results])
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Job Estimate')
-    st.download_button("Download as Excel", data=output.getvalue(), file_name="job_estimate.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-# --- Real-Time Projects Section ---
-# --- Real-Time Projects Section ---
-def fetch_live_projects(sector):
-    """
-    Fetch live (active) projects from the World Bank API for the given sector.
-    """
-    base_url = "https://search.worldbank.org/api/v2/projects"
-    params = {
-        "format": "json",
-        "statuscode_exact": "A",  # Active projects
-        "sectorname": sector,
-        "rows": 100
-    }
-
-    try:
-        response = requests.get(base_url, params=params)
-        data = response.json()
-        projects = data.get("projects", {}).values()
-        live_projects = []
-
-        for project in projects:
-            try:
-                commitment_str = str(project.get("totalcommamt", "0")).replace(",", "")
-                commitment = float(commitment_str) / 1_000_000
-                live_projects.append({
-                    "Project Name": project.get("project_name", "Unnamed"),
-                    "Country": project.get("countryshortname", "Unknown"),
-                    "P-Code": project.get("id", ""),
-                    "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
-                    "Total Commitment (USD)": commitment
-                })
-            except ValueError:
-                continue  # Skip projects with invalid commitment values
-
-        return pd.DataFrame(live_projects)
-
-    except Exception as e:
-        st.error(f"Failed to fetch live projects: {e}")
-        return pd.DataFrame()
-
-# --- Display Live Projects ---
-# --- Real-Time Projects Section ---
-def fetch_live_projects(sector, require_jobs=True):
-    """
-    Fetch live (active) projects from the World Bank API for the given sector.
-    If require_jobs is True, only include projects that mention jobs in the results framework.
-    """
-    import re
-
-    base_url = "https://search.worldbank.org/api/v2/projects"
-    params = {
-        "format": "json",
-        "statuscode_exact": "A",  # Active projects
-        "sectorname": sector,
-        "rows": 100
-    }
-
-    try:
-        response = requests.get(base_url, params=params)
-        data = response.json()
-        projects = data.get("projects", {}).values()
-        live_projects = []
-
-        for project in projects:
-            rf = project.get("resultsframework", "")
-            jobs_mentioned = None
-
-            if rf:
-                job_match = re.search(r"(\d[\d,]*)\s+(?:jobs|employment|positions|created|added)", rf.lower())
-                if job_match:
-                    try:
-                        jobs_mentioned = int(job_match.group(1).replace(",", ""))
-                    except ValueError:
-                        jobs_mentioned = None
-
-            # Skip if jobs are required but not found
-            if require_jobs and jobs_mentioned is None:
-                continue
-
-            try:
-                commitment_str = str(project.get("totalcommamt", "0")).replace(",", "")
-                commitment = float(commitment_str) / 1_000_000
-                live_projects.append({
-                    "Project Name": project.get("project_name", "Unnamed"),
-                    "Country": project.get("countryshortname", "Unknown"),
-                    "P-Code": project.get("id", ""),
-                    "Dates": f"{project.get('boardapprovaldate', '')[:10]} to {project.get('closingdate', '')[:10]}",
-                    "Total Commitment (USD)": commitment,
-                    "Jobs Mentioned": jobs_mentioned if jobs_mentioned is not None else "N/A"
-                })
-            except ValueError:
-                continue
-
-        return pd.DataFrame(live_projects)
-
-    except Exception as e:
-        st.error(f"Failed to fetch live projects: {e}")
-        return pd.DataFrame()
-
-# --- Display Live Projects ---
-if results["sector"] and results["sector"] != "general":
-    st.subheader("Live Projects in the Same Sector")
-    st.write(f"Fetching live projects for sector: **{results['sector'].capitalize()}**")
-
+    # Live projects
+    st.subheader("Active (Live) Projects in the Same Sector")
+    st.caption("Filters to those that mention jobs in the results framework; toggle to see all.")
     live_df = fetch_live_projects(results["sector"], require_jobs=True)
-
     if not live_df.empty:
-        st.dataframe(live_df)
+        st.dataframe(live_df, use_container_width=True)
     else:
         st.info("No live projects found that mention jobs in the results framework.")
-        if st.checkbox("Show all live projects in this sector instead?"):
+        show_all = st.checkbox("Show all live projects in this sector")
+        if show_all:
             all_live_df = fetch_live_projects(results["sector"], require_jobs=False)
             if not all_live_df.empty:
-                st.dataframe(all_live_df)
+                st.dataframe(all_live_df, use_container_width=True)
             else:
                 st.warning("No live projects found at all for this sector.")
+
+    # Download results
+    st.subheader("Download Results")
+    out = {
+        **results,
+        "assumptions_jobs_per_million": jobs_per_million,
+        "assumptions_direct_share": direct_pct,
+        "assumptions_indirect_share": 1.0 - direct_pct,
+        "assumptions_sector_multiplier_used": sector_multipliers.get(results["sector"], 1.0),
+        "uncertainty_pct": plus_minus_pct,
+    }
+    out_df = pd.DataFrame([out])
+
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        out_df.to_excel(writer, index=False, sheet_name="Job Estimate")
+        if not eq_df.empty:
+            eq_df.to_excel(writer, index=False, sheet_name="Comparable Projects")
+        if not live_df.empty:
+            live_df.to_excel(writer, index=False, sheet_name="Live Projects (Jobs)")
+
+    st.download_button(
+        "Download as Excel",
+        data=buffer.getvalue(),
+        file_name="pad_job_estimate.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    with st.expander("Methodology & Notes"):
+        st.markdown(
+            """
+            **Estimation approach**
+            - Identify sector cues in PAD text and map to WB-like sectors for comparables.
+            - Parse investment amounts from multiple patterns (US$, USD, million/billion, Financing cues).
+            - Compute base jobs = (US$M) × (jobs per US$1M), scaled by sector multiplier and direct/indirect shares.
+            - Detect 'better jobs' via PAD text signals (skills, OSH, standards, formalization, wages, women/youth, etc.).
+              Apply configurable shares to direct/indirect jobs when signals are present.
+            - Show ± uncertainty bands for direct/indirect totals.
+
+            **Comparable projects**
+            - Closed projects in the same sector and within ±25% of the investment amount.
+            - Where no explicit jobs are available, a text-signal heuristic is shown for context only.
+
+            **Limitations**
+            - PDF text extraction may miss tables; values could be under/over captured.
+            - Sector detection from text is approximate; consider manual override if needed.
+            - 'Better jobs' signals are proxies; for formal reporting, align with task-team agreed indicators.
+
+            **Tips**
+            - Tweak the sliders in the sidebar to run sensitivity analyses.
+            - If PADs follow a template, add a parser for “Financing Table” and “Results Framework” sections.
+            """
+        )
+else:
+    st.info("Upload a PAD PDF to begin.")
