@@ -467,29 +467,27 @@ if uploaded_file:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    with st.expander("Methodology & Notes"):
-    st.markdown(
-        """
-        **Estimation approach**
-        - Identify sector cues in PAD text and map to WB-like sectors for comparables.
-        - Parse investment amounts from multiple patterns (US$, USD, million/billion, Financing cues).
-        - Compute base jobs = (US$M) x (jobs per US$1M), scaled by sector multiplier and direct/indirect shares.
-        - Detect 'better jobs' via PAD text signals (skills, OSH, standards, formalization, wages, women/youth, etc.).
-          Apply configurable shares to direct/indirect jobs when signals are present.
-        - Show +/- uncertainty bands for direct/indirect totals.
-
-        **Comparable projects**
-        - Closed projects in the same sector and within +/-25% of the investment amount.
-        - Where no explicit jobs are available, a text-signal heuristic is shown for context only.
-
-        **Limitations**
-        - PDF text extraction may miss tables; values could be under/over captured.
-        - Sector detection from text is approximate; consider manual override if needed.
-        - 'Better jobs' signals are proxies; for formal reporting, align with task-team agreed indicators.
-
-        **Tips**
-        - Tweak the sliders in the sidebar to run sensitivity analyses.
-        - If PADs follow a template, add a parser for "Financing Table" and "Results Framework" sections.
+   with st.expander("Methodology & Notes"):
+    md = (
+        "**Estimation approach**\n"
+        "- Identify sector cues in PAD text and map to WB-like sectors for comparables.\n"
+        "- Parse investment amounts from multiple patterns (US$, USD, million/billion, Financing cues).\n"
+        "- Compute base jobs = (US$M) x (jobs per US$1M), scaled by sector multiplier and direct/indirect shares.\n"
+        "- Detect 'better jobs' via PAD text signals (skills, OSH, standards, formalization, wages, women/youth, etc.).\n"
+        "  Apply configurable shares to direct/indirect jobs when signals are present.\n"
+        "- Show +/- uncertainty bands for direct/indirect totals.\n\n"
+        "**Comparable projects**\n"
+        "- Closed projects in the same sector and within +/-25% of the investment amount.\n"
+        "- Where no explicit jobs are available, a text-signal heuristic is shown for context only.\n\n"
+        "**Limitations**\n"
+        "- PDF text extraction may miss tables; values could be under/over captured.\n"
+        "- Sector detection from text is approximate; consider manual override if needed.\n"
+        "- 'Better jobs' signals are proxies; for formal reporting, align with task-team agreed indicators.\n\n"
+        "**Tips**\n"
+        "- Tweak the sliders in the sidebar to run sensitivity analyses.\n"
+        "- If PADs follow a template, add a parser for \"Financing Table\" and \"Results Framework\" sections.\n"
+    )
+    st.markdown(md)
         """
     )        
 else:
