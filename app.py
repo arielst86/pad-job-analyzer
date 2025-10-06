@@ -468,29 +468,29 @@ if uploaded_file:
     )
 
     with st.expander("Methodology & Notes"):
-        st.markdown(
-            """
-            **Estimation approach**
-            - Identify sector cues in PAD text and map to WB-like sectors for comparables.
-            - Parse investment amounts from multiple patterns (US$, USD, million/billion, Financing cues).
-            - Compute base jobs = (US$M) × (jobs per US$1M), scaled by sector multiplier and direct/indirect shares.
-            - Detect 'better jobs' via PAD text signals (skills, OSH, standards, formalization, wages, women/youth, etc.).
-              Apply configurable shares to direct/indirect jobs when signals are present.
-            - Show ± uncertainty bands for direct/indirect totals.
+    st.markdown(
+        """
+        **Estimation approach**
+        - Identify sector cues in PAD text and map to WB-like sectors for comparables.
+        - Parse investment amounts from multiple patterns (US$, USD, million/billion, Financing cues).
+        - Compute base jobs = (US$M) x (jobs per US$1M), scaled by sector multiplier and direct/indirect shares.
+        - Detect 'better jobs' via PAD text signals (skills, OSH, standards, formalization, wages, women/youth, etc.).
+          Apply configurable shares to direct/indirect jobs when signals are present.
+        - Show +/- uncertainty bands for direct/indirect totals.
 
-            **Comparable projects**
-            - Closed projects in the same sector and within ±25% of the investment amount.
-            - Where no explicit jobs are available, a text-signal heuristic is shown for context only.
+        **Comparable projects**
+        - Closed projects in the same sector and within +/-25% of the investment amount.
+        - Where no explicit jobs are available, a text-signal heuristic is shown for context only.
 
-            **Limitations**
-            - PDF text extraction may miss tables; values could be under/over captured.
-            - Sector detection from text is approximate; consider manual override if needed.
-            - 'Better jobs' signals are proxies; for formal reporting, align with task-team agreed indicators.
+        **Limitations**
+        - PDF text extraction may miss tables; values could be under/over captured.
+        - Sector detection from text is approximate; consider manual override if needed.
+        - 'Better jobs' signals are proxies; for formal reporting, align with task-team agreed indicators.
 
-            **Tips**
-            - Tweak the sliders in the sidebar to run sensitivity analyses.
-            - If PADs follow a template, add a parser for “Financing Table” and “Results Framework” sections.
-            """
-        )
+        **Tips**
+        - Tweak the sliders in the sidebar to run sensitivity analyses.
+        - If PADs follow a template, add a parser for "Financing Table" and "Results Framework" sections.
+        """
+    )        
 else:
     st.info("Upload a PAD PDF to begin.")
