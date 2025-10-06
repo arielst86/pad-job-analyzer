@@ -984,3 +984,4 @@ if uploaded_file:
         )
 
 else:
+    st.info("Upload a PAD PDF to begin.")
