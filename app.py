@@ -1,6 +1,6 @@
 
-# app.py
-# PAD Job Creation & Better Jobs Analyzer — Robust Ensemble + Monte Carlo with traceable assumptions
+# app.py 
+# PAD Job Creation & Better Jobs Analyzer — Robust Ensemble + Monte Carlo with traceable assumptions (v2 — condensed evidence + lower uncertainty)
 import re
 from io import BytesIO
 from typing import Tuple, Dict, List, Any, Optional
@@ -69,6 +69,16 @@ def to_int(num_str: str) -> Optional[int]:
         return int(float(s))
     except Exception:
         return None
+
+# Short snippet helper
+def short_snip(s: str, max_len: int = 160) -> str:
+    if not s:
+        return ""
+    s = s.replace("\n", " ").strip()
+    if len(s) <= max_len:
+        return s
+    return s[:max_len-1].rstrip() + "…"
+
 # ============================================================
 # Investment Amount Parsing (US$ million only; robust to wording)
 # ============================================================
@@ -86,15 +96,15 @@ def parse_investment_amount_million(text: str) -> Tuple[Optional[float], str, Di
     candidates: List[Tuple[float, str]] = []
     for pat in INV_PATTERNS:
         for m in pat.finditer(text):
-            groups = m.groups()
-            # normalize groups to find numeric and unit
-            nums = [g for g in groups if g and re.match(r"^[0-9][\d,]*\.?\d*$", g)]
-            units = [g for g in groups if g and re.search(r"(million|billion)", g, re.I)]
-            if not nums or not units:
-                continue
-            num = nums[0]
-            unit = units[0]
             try:
+                groups = m.groups()
+                # Find numeric and unit
+                nums = [g for g in groups if g and re.match(r"^[0-9][\d,]*\.?\d*$", g)]
+                units = [g for g in groups if g and re.search(r"(million|billion)", g, re.I)]
+                if not nums or not units:
+                    continue
+                num = nums[0]
+                unit = units[0]
                 val = float(num.replace(",", ""))
                 if "billion" in unit.lower():
                     val *= 1000.0
@@ -127,6 +137,7 @@ def map_amount_to_page_evidence(pages: List[str], snippet: str) -> Optional[Dict
         if snippet in page:
             return {"page": i + 1, "quote": snippet}
     return None
+
 # ============================================================
 # Explicit Job Extraction (keeps your robust logic, expanded)
 # ============================================================
@@ -310,6 +321,7 @@ def find_explicit_jobs(pages: List[str]) -> Optional[Dict[str, Any]]:
                             }
                         }
     return None
+
 # ============================================================
 # Sector & Signals (Multi-label detection + quality signals)
 # ============================================================
@@ -327,6 +339,7 @@ SECTOR_CUES: Dict[str, List[str]] = {
     "Social Protection": ["social protection", "cash transfer", "safety net", "public works", "cash-for-work", "labor-intensive"],
     "Other / General": [],
 }
+
 # Base priors per sector (total jobs per million & direct share)
 # These are used as priors and will be adjusted and shrunk by signals & evidence quality.
 AI_PRIORS: Dict[str, Dict[str, float]] = {
@@ -343,15 +356,15 @@ AI_PRIORS: Dict[str, Dict[str, float]] = {
     "Social Protection": {"jobs_per_million_total": 190.0, "direct_share": 0.47},
     "Other / General": {"jobs_per_million_total": 115.0, "direct_share": 0.35},
 }
-# Signals that influence both quantity (jobs per $) and "quality" (better jobs probability)
-# Each rule: regex -> multipliers and better-job deltas; with transparent evidence
+
+# Signals that influence both quantity (jobs per $) and "quality" (better-job probability)
 ADJUSTMENT_RULES: List[Dict[str, Any]] = [
     {
         "name": "Labor-intensive / public works",
         "pattern": re.compile(r"\b(labor[\-\s]?intensive|public works|cash[\-\s]?for[\-\s]?work)\b", re.I),
         "jobs_per_million_mult": 1.4,
         "direct_share_delta": +0.05,
-        "better_job_delta_direct": -0.04,  # often temporary; quality may be lower unless standards present
+        "better_job_delta_direct": -0.04,
         "better_job_delta_indirect": -0.02,
         "quality_note": "Short-term, low-wage unless paired with standards/skills."
     },
@@ -360,7 +373,7 @@ ADJUSTMENT_RULES: List[Dict[str, Any]] = [
         "pattern": re.compile(r"\b(msme|sme|credit line|matching grant|partial credit guarantee)\b", re.I),
         "jobs_per_million_mult": 1.15,
         "direct_share_delta": -0.08,
-        "better_job_delta_direct": +0.03,  # formalization/productivity gains possible for beneficiaries
+        "better_job_delta_direct": +0.03,
         "better_job_delta_indirect": +0.02,
         "quality_note": "Access to finance can raise productivity/formality."
     },
@@ -428,7 +441,8 @@ ADJUSTMENT_RULES: List[Dict[str, Any]] = [
         "quality_note": "TA boosts capabilities; smaller job counts per $ but can improve quality."
     },
 ]
-# Base better-jobs probability priors (by sector), later adjusted by rules and evidence strength
+
+# Base better-jobs probability priors (by sector)
 BETTER_JOBS_PRIOR = {
     "Agriculture": 0.32,
     "Manufacturing": 0.40,
@@ -444,41 +458,63 @@ BETTER_JOBS_PRIOR = {
     "Other / General": 0.36
 }
 
-def detect_sectors_weighted(pages: List[str]) -> Tuple[List[Tuple[str, float]], List[Dict[str, Any]]]:
+# --- NEW: sector evidence weighting by section rank + priority count ---
+def detect_sectors_weighted(pages: List[str]) -> Tuple[List[Tuple[str, float]], List[Dict[str, Any]], int]:
     """
-    Returns a list of (sector, weight) summing to 1.0 for top 2 sectors (if available),
-    plus evidence items [{sector, page, quote}].
+    Returns: (list of (sector, weight) for top 2 sectors summing to 1.0,
+              evidence items [{sector, page, quote, rank}],
+              priority_hits = count of sector cues found on priority pages (rank <= 1.5)).
     """
-    scores: Dict[str, int] = {}
-    evidence = []
+    def weight_from_rank(r: float) -> float:
+        if r <= 0.5:
+            return 2.0
+        if r <= 1.5:
+            return 1.6
+        if r <= 2.5:
+            return 1.25
+        return 1.0
+
+    scores: Dict[str, float] = {}
+    evidence: List[Dict[str, Any]] = []
+    priority_hits = 0
     for i, page in enumerate(pages):
         low = page.lower()
+        r = page_rank(pages, i)
+        w = weight_from_rank(r)
         for sector, cues in SECTOR_CUES.items():
             for cue in cues:
                 if cue and cue in low:
                     cnt = low.count(cue)
-                    scores[sector] = scores.get(sector, 0) + cnt
-                    if cnt > 0:
-                        # capture one example per sector
-                        if not any(ev.get("sector") == sector for ev in evidence):
-                            m = re.search(re.escape(cue), low, re.I)
-                            if m:
-                                evidence.append({"sector": sector, "page": i + 1, "quote": exact_sentence(page, m.span())})
+                    scores[sector] = scores.get(sector, 0.0) + w * cnt
+                    # capture one example per sector
+                    if not any(ev.get("sector") == sector for ev in evidence):
+                        m = re.search(re.escape(cue), low, re.I)
+                        if m:
+                            q = exact_sentence(page, m.span())
+                            evidence.append({"sector": sector, "page": i + 1, "quote": q, "rank": r})
+                            if r <= 1.5:
+                                priority_hits += 1
     if not scores:
-        return [("Other / General", 1.0)], evidence
-    # normalize top 2
+        return [("Other / General", 1.0)], evidence, priority_hits
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
     top = ranked[:2]
     total = sum(s for _, s in top)
     weighted = [(sec, s / total if total > 0 else 0.5) for sec, s in top]
-    return weighted, evidence
+    return weighted, evidence, priority_hits
+
+# include rank + impact in adjustments evidence
 
 def detect_adjustments(pages: List[str]) -> List[Dict[str, Any]]:
     hits = []
     for i, page in enumerate(pages):
+        r = page_rank(pages, i)
         for rule in ADJUSTMENT_RULES:
             for m in rule["pattern"].finditer(page):
                 sent = exact_sentence(page, m.span())
+                impact = abs(np.log(max(1e-6, rule["jobs_per_million_mult"]))) \
+                         + 2.0 * abs(rule["direct_share_delta"]) \
+                         + 1.2 * max(0.0, rule["better_job_delta_direct"]) \
+                         + 0.8 * max(0.0, rule["better_job_delta_indirect"])
                 hits.append({
                     "name": rule["name"],
                     "jobs_per_million_mult": rule["jobs_per_million_mult"],
@@ -487,9 +523,11 @@ def detect_adjustments(pages: List[str]) -> List[Dict[str, Any]]:
                     "better_job_delta_indirect": rule["better_job_delta_indirect"],
                     "quality_note": rule["quality_note"],
                     "page": i + 1,
-                    "quote": sent
+                    "quote": sent,
+                    "rank": r,
+                    "impact": float(impact),
                 })
-    # deduplicate
+    # deduplicate (name, quote, page)
     seen = set()
     uniq = []
     for h in hits:
@@ -498,24 +536,27 @@ def detect_adjustments(pages: List[str]) -> List[Dict[str, Any]]:
             seen.add(key)
             uniq.append(h)
     return uniq
+
 # ============================================================
 # Robust Estimation (Ensemble + Monte Carlo)
 # ============================================================
 
-def compute_uncertainty_scale(amount_conf: str, sector_evidence_count: int, n_rules: int) -> Dict[str, float]:
+def compute_uncertainty_scale(amount_conf: str, sector_evidence_count: int, n_rules: int, priority_hits: int = 0) -> Dict[str, float]:
     """
     Returns dispersion controls for Monte Carlo. Lower sigma => tighter (reduced) uncertainty.
     """
-    # base dispersions
-    sigma_jobs = 0.45  # lognormal sigma for jobs_per_million (base)
-    k_direct = (15, 20)  # Beta parameters base for direct share
+    # base dispersions (slightly tighter than v1)
+    sigma_jobs = 0.38  # lognormal sigma for jobs_per_million (base)
+    k_direct = (18, 24)  # Beta parameters base for direct share (slightly stronger than v1)
+
     # amount confidence effect
     if amount_conf.startswith("High"):
         sigma_jobs -= 0.12
     elif amount_conf.startswith("Medium"):
-        sigma_jobs -= 0.04
+        sigma_jobs -= 0.05
     else:
         sigma_jobs += 0.05
+
     # sector evidence effect
     if sector_evidence_count >= 2:
         sigma_jobs -= 0.06
@@ -523,32 +564,45 @@ def compute_uncertainty_scale(amount_conf: str, sector_evidence_count: int, n_ru
         sigma_jobs -= 0.03
     else:
         sigma_jobs += 0.05
+
     # rule corroboration effect
     if n_rules >= 3:
-        sigma_jobs -= 0.05
+        sigma_jobs -= 0.06
     elif n_rules >= 1:
         sigma_jobs -= 0.02
     else:
         sigma_jobs += 0.04
+
+    # NEW: priority cues (Results/PDO/Economic Analysis pages) -> more shrinkage
+    if priority_hits >= 2:
+        sigma_jobs -= 0.10
+    elif priority_hits == 1:
+        sigma_jobs -= 0.05
+
     # clamp
-    sigma_jobs = float(np.clip(sigma_jobs, 0.12, 0.60))
+    sigma_jobs = float(np.clip(sigma_jobs, 0.10, 0.50))
+
     # Direct share concentration via Beta prior strength
-    # More evidence => stronger (less variance)
     base_alpha, base_beta = k_direct
     strength_delta = 10 if n_rules >= 3 else (6 if n_rules >= 1 else 0)
     if amount_conf.startswith("High"):
         strength_delta += 6
     if sector_evidence_count >= 2:
         strength_delta += 6
+    if priority_hits >= 1:
+        strength_delta += 6
+
     alpha = base_alpha + strength_delta
     beta = base_beta + strength_delta
     return {"sigma_jobs": sigma_jobs, "alpha_direct": alpha, "beta_direct": beta}
 
+
 def ai_estimate_jobs_and_better(pages: List[str]) -> Dict[str, Any]:
     full_text = "\n".join(pages)
-    # 1) Sector detection (weighted)
-    sector_weights, sector_evs = detect_sectors_weighted(pages)
+    # 1) Sector detection (weighted + priority)
+    sector_weights, sector_evs, priority_hits = detect_sectors_weighted(pages)
     sector_ev_present = len(sector_evs) > 0
+
     # 2) Financing amount parsing
     amount_m, amount_conf, amount_ev = parse_investment_amount_million(full_text)
     if amount_ev and not amount_ev.get("page"):
@@ -562,60 +616,90 @@ def ai_estimate_jobs_and_better(pages: List[str]) -> Dict[str, Any]:
         used_default_amount = True
         amount_conf = "Low (used default US$50M because financing not detected)"
         amount_ev = {"page": None, "quote": "No clear financing amount found; default used for AI estimate."}
+
     # 3) Initialize priors as weighted average across sectors
     def wavg(key: str, table: Dict[str, Dict[str, float]]) -> float:
         out = 0.0
         for sec, w in sector_weights:
             out += w * table.get(sec, table["Other / General"]).get(key, table["Other / General"][key])
         return out
+
     base_jobs_per_million = wavg("jobs_per_million_total", AI_PRIORS)
     base_direct_share = wavg("direct_share", AI_PRIORS)
+
     base_better_prior = 0.0
     for sec, w in sector_weights:
         base_better_prior += w * BETTER_JOBS_PRIOR.get(sec, BETTER_JOBS_PRIOR["Other / General"])
-    # 4) Adjustment rules from PAD text
+
+    # 4) Adjustment rules from PAD text (with dampening to avoid compounding and reduce uncertainty)
     adj_hits = detect_adjustments(pages)
+    # sort by section rank (more authoritative first)
+    adj_sorted = sorted(adj_hits, key=lambda h: (h.get("rank", DEFAULT_RANK), h.get("page", 9999)))
+    # dampening weights for sequential application
+    damp_seq = [1.0, 0.75, 0.6, 0.5, 0.4, 0.35, 0.3]
+
     jobs_per_million = base_jobs_per_million
     direct_share = base_direct_share
     better_p_direct = base_better_prior
     better_p_indirect = base_better_prior - 0.03  # often slightly lower upstream in supply chains
-    for h in adj_hits:
-        jobs_per_million *= h["jobs_per_million_mult"]
-        direct_share = float(np.clip(direct_share + h["direct_share_delta"], 0.05, 0.90))
-        better_p_direct = float(np.clip(better_p_direct + h["better_job_delta_direct"], 0.05, 0.95))
-        better_p_indirect = float(np.clip(better_p_indirect + h["better_job_delta_indirect"], 0.05, 0.95))
+
+    # combine multipliers with dampening
+    combined_mult = 1.0
+    for k, h in enumerate(adj_sorted):
+        w = damp_seq[k] if k < len(damp_seq) else 0.3
+        combined_mult *= (1.0 + w * (h["jobs_per_million_mult"] - 1.0))
+        direct_share = float(np.clip(direct_share + w * h["direct_share_delta"], 0.05, 0.90))
+        better_p_direct = float(np.clip(better_p_direct + w * h["better_job_delta_direct"], 0.05, 0.95))
+        better_p_indirect = float(np.clip(better_p_indirect + w * h["better_job_delta_indirect"], 0.05, 0.95))
+    # soft shrinkage of combined multiplier toward 1.0 when evidence is weak
+    evidence_strength = (min(3, len(adj_sorted)) * 0.25) + (min(2, priority_hits) * 0.2) + (0.2 if amount_conf.startswith("High") else (0.1 if amount_conf.startswith("Medium") else 0.0)) + (0.15 if len(sector_evs) >= 2 else (0.05 if len(sector_evs) == 1 else 0.0))
+    evidence_strength = float(np.clip(evidence_strength, 0.35, 0.95))
+    jobs_per_million = base_jobs_per_million * (1 - (1 - combined_mult) * evidence_strength)
+
+    # guardrails on jobs_per_million (winsorize point estimate against priors)
+    lower_guard = 0.5 * base_jobs_per_million
+    upper_guard = 3.0 * base_jobs_per_million
+    jobs_per_million = float(np.clip(jobs_per_million, lower_guard, upper_guard))
+
     # 5) Evidence-driven uncertainty controls
-    scales = compute_uncertainty_scale(amount_conf, len(sector_evs), len(adj_hits))
+    scales = compute_uncertainty_scale(amount_conf, len(sector_evs), len(adj_sorted), priority_hits)
     sigma_jobs = scales["sigma_jobs"]
     alpha_direct = scales["alpha_direct"]
     beta_direct = scales["beta_direct"]
+
     # 6) Monte Carlo simulation (reduced uncertainty with stronger evidence)
-    N = 5000
+    N = 8000
     # Lognormal for jobs_per_million (mean at current point)
-    # We convert mean -> mu for lognormal via mean = exp(mu + 0.5*sigma^2)
     mu = np.log(max(jobs_per_million, 1e-6)) - 0.5 * sigma_jobs**2
     draws_jpm = np.random.lognormal(mean=mu, sigma=sigma_jobs, size=N)
-    # Beta for direct share (centered at current point by scaling alpha/beta)
-    # We adjust alpha/beta to match our current mean while keeping total strength = alpha+beta
+    # winsorize tails to reduce undue influence of extreme values
+    q01, q99 = np.quantile(draws_jpm, [0.01, 0.99])
+    draws_jpm = np.clip(draws_jpm, q01, q99)
+
+    # Beta for direct share (centered at current point)
     total_strength = alpha_direct + beta_direct
     mean_target = float(np.clip(direct_share, 0.05, 0.95))
     alpha_adj = mean_target * total_strength
     beta_adj = (1 - mean_target) * total_strength
     draws_direct_share = np.random.beta(alpha_adj, beta_adj, size=N)
-    # Slight uncertainty around better job probabilities
-    bj_sigma = 0.08 - min(0.05, 0.01 * (len(adj_hits) + len(sector_evs)))  # narrower with more evidence
-    bj_sigma = float(np.clip(bj_sigma, 0.02, 0.08))
+
+    # Slight uncertainty around better job probabilities (narrower with more evidence + priority)
+    bj_sigma_base = 0.07
+    bj_sigma = bj_sigma_base - min(0.05, 0.012 * (len(adj_sorted) + len(sector_evs) + priority_hits))
+    bj_sigma = float(np.clip(bj_sigma, 0.015, bj_sigma_base))
     draws_better_direct = np.clip(np.random.normal(loc=better_p_direct, scale=bj_sigma, size=N), 0.02, 0.98)
     draws_better_indirect = np.clip(np.random.normal(loc=better_p_indirect, scale=bj_sigma, size=N), 0.02, 0.98)
+
     # 7) Compute distributions
     total_jobs_draws = amount_m * draws_jpm
     direct_jobs_draws = np.round(total_jobs_draws * draws_direct_share)
     indirect_jobs_draws = np.round(total_jobs_draws - direct_jobs_draws)
     better_direct_draws = np.round(direct_jobs_draws * draws_better_direct)
     better_indirect_draws = np.round(indirect_jobs_draws * draws_better_indirect)
+
     def pct(arr, q):
         return float(np.percentile(arr, q))
-    # Medians and P10-P90
+
     out = {
         "mode": "AI-fallback",
         "sector_weights": sector_weights,
@@ -643,7 +727,9 @@ def ai_estimate_jobs_and_better(pages: List[str]) -> Dict[str, Any]:
                 "quality_note": h["quality_note"],
                 "page": h["page"],
                 "quote": h["quote"],
-            } for h in adj_hits]
+                "rank": h.get("rank", DEFAULT_RANK),
+                "impact": h.get("impact", 0.0),
+            } for h in adj_sorted]
         },
         "distributions": {
             "total_jobs": {"p10": pct(total_jobs_draws, 10), "p50": pct(total_jobs_draws, 50), "p90": pct(total_jobs_draws, 90)},
@@ -656,39 +742,47 @@ def ai_estimate_jobs_and_better(pages: List[str]) -> Dict[str, Any]:
         "evidence": {
             "sector_quotes": sector_evs if sector_ev_present else None,
             "amount_quote": amount_ev,
-            "note": "Estimates derived from sector weights, financing, and PAD signals; see explanations below."
+            "note": "Estimates derived from sector weights, financing, and PAD signals; see explanations below.",
+            "priority_hits": priority_hits,
         }
     }
-    # Express a compact ±% uncertainty around medians for display
+
+    # Compact ±% uncertainty around medians for display
     med = out["distributions"]["total_jobs"]["p50"]
     halfspan = (out["distributions"]["total_jobs"]["p90"] - out["distributions"]["total_jobs"]["p10"]) / 2.0
-    plus_minus_pct = int(np.clip(100.0 * halfspan / med if med > 0 else 50.0, 8, 45))
+    plus_minus_pct = int(np.clip(100.0 * halfspan / med if med > 0 else 50.0, 6, 40))
     out["uncertainty_pct"] = plus_minus_pct
     return out
+
 # ============================================================
 # Better Jobs estimate for PAD-explicit counts
 # ============================================================
 
 def estimate_better_from_explicit(direct: Optional[int], indirect: Optional[int], pages: List[str]) -> Dict[str, Any]:
     # Reuse sector weights & signals to compute better-job probabilities
-    sector_weights, sector_evs = detect_sectors_weighted(pages)
+    sector_weights, sector_evs, priority_hits = detect_sectors_weighted(pages)
     adj_hits = detect_adjustments(pages)
     base_better_prior = 0.0
     for sec, w in sector_weights:
         base_better_prior += w * BETTER_JOBS_PRIOR.get(sec, BETTER_JOBS_PRIOR["Other / General"])
     better_p_direct = base_better_prior
     better_p_indirect = base_better_prior - 0.03
-    for h in adj_hits:
-        better_p_direct = float(np.clip(better_p_direct + h["better_job_delta_direct"], 0.02, 0.98))
-        better_p_indirect = float(np.clip(better_p_indirect + h["better_job_delta_indirect"], 0.02, 0.98))
-    # Slight uncertainty around better-job probabilities (narrow if many cues)
-    bj_sigma = 0.06 - min(0.04, 0.01 * (len(adj_hits) + len(sector_evs)))
+    # dampening as in AI fallback
+    adj_sorted = sorted(adj_hits, key=lambda h: (h.get("rank", DEFAULT_RANK), h.get("page", 9999)))
+    damp_seq = [1.0, 0.75, 0.6, 0.5, 0.4, 0.35, 0.3]
+    for k, h in enumerate(adj_sorted):
+        w = damp_seq[k] if k < len(damp_seq) else 0.3
+        better_p_direct = float(np.clip(better_p_direct + w * h["better_job_delta_direct"], 0.02, 0.98))
+        better_p_indirect = float(np.clip(better_p_indirect + w * h["better_job_delta_indirect"], 0.02, 0.98))
+    # Slight uncertainty around better-job probabilities (narrow if many cues + priority)
+    bj_sigma = 0.06 - min(0.04, 0.01 * (len(adj_sorted) + len(sector_evs) + priority_hits))
     bj_sigma = float(np.clip(bj_sigma, 0.015, 0.06))
     N = 4000
     draws_better_direct = np.clip(np.random.normal(better_p_direct, bj_sigma, size=N), 0.02, 0.98)
     draws_better_indirect = np.clip(np.random.normal(better_p_indirect, bj_sigma, size=N), 0.02, 0.98)
+
     def pct(arr, q): return float(np.percentile(arr, q))
-    out = {"evidence": {"sector_quotes": sector_evs or None, "adjustment_quotes": adj_hits or None}}
+    out = {"evidence": {"sector_quotes": sector_evs or None, "adjustment_quotes": adj_sorted or None}}
     if direct is not None:
         bd = np.round(direct * draws_better_direct)
         out["better_direct"] = {"p10": pct(bd, 10), "p50": pct(bd, 50), "p90": pct(bd, 90), "p": better_p_direct}
@@ -698,10 +792,9 @@ def estimate_better_from_explicit(direct: Optional[int], indirect: Optional[int]
     return out
 
 # ============================================================
-# NEW: Explanations & Better-Job forms helpers (no snippets shown)
+# NEW: Explanations & Better-Job forms helpers (with concise snippets)
 # ============================================================
 
-# Map rules to "forms of better jobs"
 RULE_TO_FORM = {
     "Skills, training, apprenticeships": "Better wages & productivity",
     "MSME finance / credit line": "Better wages & productivity",
@@ -710,8 +803,8 @@ RULE_TO_FORM = {
     "OSH / safety investments": "Safer working conditions (OSH)",
     "Female employment / childcare / inclusion": "Inclusion & accessibility",
     "Green / renewable / resource efficiency": "Greener production & higher standards",
-    # Construction heavy has quality ~ neutral; we won't count it towards a form by default
 }
+
 DEFAULT_FORM_WEIGHTS = {
     "Better wages & productivity": 0.55,
     "Better terms of employment (contracts, benefits)": 0.25,
@@ -724,8 +817,25 @@ def _fmt_pct(x: float) -> str:
     return f"{x*100:.0f}%"
 
 def _fmt_pp(x: float) -> str:
-    # percentage points formatting with sign
     return f"{x*100:+.0f} pp"
+
+# concise evidence selectors
+
+def top_sector_examples(sector_evs: List[Dict[str, Any]], sector_weights: List[Tuple[str, float]], top_n: int = 2) -> List[Dict[str, Any]]:
+    top_sectors = [s for s, _ in sorted(sector_weights, key=lambda t: t[1], reverse=True)[:top_n]]
+    out = []
+    for s in top_sectors:
+        items = [ev for ev in sector_evs if ev.get("sector") == s]
+        if items:
+            out.append(items[0])
+    return out
+
+def top_adjustment_hits(adj: List[Dict[str, Any]], top_n: int = 3) -> List[Dict[str, Any]]:
+    if not adj:
+        return []
+    ranked = sorted(adj, key=lambda h: (-(h.get("impact", 0.0)), h.get("rank", DEFAULT_RANK), h.get("page", 9e9)))
+    return ranked[:top_n]
+
 
 def build_adjustment_explanations(sector_weights: List[Tuple[str, float]],
                                   base_jobs_per_million: float,
@@ -733,7 +843,7 @@ def build_adjustment_explanations(sector_weights: List[Tuple[str, float]],
                                   base_better_direct: float,
                                   base_better_indirect: float,
                                   adj_hits: List[Dict[str, Any]]) -> List[str]:
-    """Return human-readable explanations of how each detected signal changed quantities and quality."""
+    """Legacy detailed explanation kept (not shown by default in v2)."""
     explanations = []
     jpm = base_jobs_per_million
     dshare = base_direct_share
@@ -746,26 +856,25 @@ def build_adjustment_explanations(sector_weights: List[Tuple[str, float]],
         new_bj_i = float(np.clip(bj_i + h["better_job_delta_indirect"], 0.05, 0.95))
         msg = (
             f"**{h['name']}** (page {h['page']}): increased jobs-per-$ from {jpm:.1f} → {new_jpm:.1f} "
-            f"({_fmt_pct(h['jobs_per_million_mult']-1) if h['jobs_per_million_mult']!=1 else '+0%'}), "
-            f"shifted direct share {dshare:.2f} → {new_dshare:.2f} ({_fmt_pp(new_dshare-dshare)}), "
-            f"and adjusted 'better job' probabilities to direct {bj_d:.2f} → {new_bj_d:.2f} ({_fmt_pp(new_bj_d-bj_d)}), "
-            f"indirect {bj_i:.2f} → {new_bj_i:.2f} ({_fmt_pp(new_bj_i-bj_i)}).  _{h['quality_note']}_."
+            f"({ _fmt_pct(h['jobs_per_million_mult']-1) if h['jobs_per_million_mult']!=1 else '+0%'}), "
+            f"shifted direct share {dshare:.2f} → {new_dshare:.2f} ({ _fmt_pp(new_dshare-dshare)}), "
+            f"and adjusted 'better job' probabilities to direct {bj_d:.2f} → {new_bj_d:.2f} ({ _fmt_pp(new_bj_d-bj_d)}), "
+            f"indirect {bj_i:.2f} → {new_bj_i:.2f} ({ _fmt_pp(new_bj_i-bj_i)}). _{h['quality_note']}_."
         )
-        # join tuple of fragments
         explanations.append("".join(msg))
         jpm, dshare, bj_d, bj_i = new_jpm, new_dshare, new_bj_d, new_bj_i
     if not explanations:
         explanations.append("No special adjustment signals detected; estimates rely on sector priors and financing amount.")
     return explanations
 
+
 def explain_sector_basis(sector_weights: List[Tuple[str, float]]) -> Tuple[str, float, float]:
-    # Build text and compute base from priors
     parts = []
     base_jpm = 0.0
     base_dir = 0.0
     for sec, w in sector_weights:
         pri = AI_PRIORS.get(sec, AI_PRIORS["Other / General"])
-        parts.append(f"{sec} (weight {w:.0%} | priors: {pri['jobs_per_million_total']:.0f} jobs/US$1M, direct share {pri['direct_share']:.2f})")
+        parts.append(f"{sec} (weight {w:.0%} \n priors: {pri['jobs_per_million_total']:.0f} jobs/US$1M, direct share {pri['direct_share']:.2f})")
         base_jpm += w * pri["jobs_per_million_total"]
         base_dir += w * pri["direct_share"]
     text = (
@@ -776,10 +885,10 @@ def explain_sector_basis(sector_weights: List[Tuple[str, float]]) -> Tuple[str, 
     text += "\n\n• " + "; ".join(parts)
     return text, base_jpm, base_dir
 
+
 def build_better_forms(better_direct_p50: Optional[float], better_indirect_p50: Optional[float],
                        adj_hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     total_better = (better_direct_p50 or 0) + (better_indirect_p50 or 0)
-    # Scores from positive improvements only
     scores: Dict[str, float] = {k: 0.0 for k in DEFAULT_FORM_WEIGHTS.keys()}
     provenance: Dict[str, List[int]] = {k: [] for k in DEFAULT_FORM_WEIGHTS.keys()}
     for h in adj_hits:
@@ -791,13 +900,10 @@ def build_better_forms(better_direct_p50: Optional[float], better_indirect_p50: 
             continue
         scores[form] += float(delta)
         provenance[form].append(h["page"])
-    # If no positive signals, use defaults
     if sum(scores.values()) <= 1e-9:
         scores = DEFAULT_FORM_WEIGHTS.copy()
-    # Normalize to shares
     ssum = sum(scores.values())
     shares = {k: (v/ssum if ssum > 0 else 0) for k, v in scores.items()}
-    # Allocate counts
     results = []
     for label, sh in shares.items():
         count = int(round(total_better * sh))
@@ -807,7 +913,6 @@ def build_better_forms(better_direct_p50: Optional[float], better_indirect_p50: 
             if pgs else "Driven by sector-average quality improvements (no specific signals detected)."
         )
         results.append({"form": label, "share": sh, "count": count, "rationale": rationale})
-    # sort by count desc
     results.sort(key=lambda x: (-x["count"], x["form"]))
     return results
 
@@ -821,9 +926,11 @@ if uploaded_file:
     if not any(pages):
         st.error("No selectable text extracted. The PDF may be scanned or image-only. Consider OCR.")
         st.stop()
+
     explicit = find_explicit_jobs(pages)
+
     if explicit:
-        # ----------------------------- EXPLICIT MODE -----------------------------
+        # ---------------------------- EXPLICIT MODE ---------------------------
         st.subheader("Job Creation (stated explicitly in PAD)")
         c1, c2, c3, c4 = st.columns(4)
         with c1:
@@ -845,13 +952,13 @@ if uploaded_file:
             rng = (bj["better_direct"]["p10"], bj["better_direct"]["p90"])
             with c5:
                 st.metric("Better-Direct (P50)", f"{int(round(bd)):,}")
-                st.caption(f"P10–P90: {int(round(rng[0])):,} – {int(round(rng[1])):,}")
+            st.caption(f"P10–P90: {int(round(rng[0])):,} – {int(round(rng[1])):,}")
         if "better_indirect" in bj:
             bi = bj["better_indirect"]["p50"]
             rngi = (bj["better_indirect"]["p10"], bj["better_indirect"]["p90"])
             with c6:
                 st.metric("Better-Indirect (P50)", f"{int(round(bi)):,}")
-                st.caption(f"P10–P90: {int(round(rngi[0])):,} – {int(round(rngi[1])):,}")
+            st.caption(f"P10–P90: {int(round(rngi[0])):,} – {int(round(rngi[1])):,}")
 
         # NEW: Forms in which jobs became "better"
         st.markdown("**How are these jobs 'better'? (forms)**")
@@ -861,7 +968,7 @@ if uploaded_file:
         df_forms = pd.DataFrame([{**f, "share": f"{f['share']*100:.0f}%"} for f in forms])[ ["form","count","share","rationale"] ]
         st.dataframe(df_forms, hide_index=True, use_container_width=True)
 
-        # PAD Quotes (keep as-is; user change request is for 'PAD Evidence and Signals Used' in AI mode)
+        # PAD Quotes
         st.subheader("Exact PAD Quotes")
         ev = explicit.get("evidence", {})
         if "jobs_quote" in ev and ev["jobs_quote"]:
@@ -888,6 +995,7 @@ if uploaded_file:
                 "- **Environmental quality** (green/clean jobs)\n\n"
                 "The estimator reads PAD signals about these aspects and assigns probabilities to jobs being 'better'."
             )
+
         # Download
         out = {
             "mode": explicit["mode"],
@@ -924,20 +1032,21 @@ if uploaded_file:
             file_name="pad_jobs_explicit_better.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
     else:
-        # ----------------------------- AI FALLBACK MODE -----------------------------
+        # ---------------------------- AI FALLBACK MODE ------------------------
         ai = ai_estimate_jobs_and_better(pages)
         st.subheader("Job Creation (AI fallback, robust ensemble)")
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.metric("Direct Jobs (P50)", f"{int(round(ai['distributions']['direct_jobs']['p50'])):,}")
-            st.caption(f"P10–P90: {int(round(ai['distributions']['direct_jobs']['p10'])):,} – {int(round(ai['distributions']['direct_jobs']['p90'])):,}")
+        st.caption(f"P10–P90: {int(round(ai['distributions']['direct_jobs']['p10'])):,} – {int(round(ai['distributions']['direct_jobs']['p90'])):,}")
         with c2:
             st.metric("Indirect Jobs (P50)", f"{int(round(ai['distributions']['indirect_jobs']['p50'])):,}")
-            st.caption(f"P10–P90: {int(round(ai['distributions']['indirect_jobs']['p10'])):,} – {int(round(ai['distributions']['indirect_jobs']['p90'])):,}")
+        st.caption(f"P10–P90: {int(round(ai['distributions']['indirect_jobs']['p10'])):,} – {int(round(ai['distributions']['indirect_jobs']['p90'])):,}")
         with c3:
             st.metric("Total Jobs (P50)", f"{int(round(ai['distributions']['total_jobs']['p50'])):,}")
-            st.caption(f"P10–P90: {int(round(ai['distributions']['total_jobs']['p10'])):,} – {int(round(ai['distributions']['total_jobs']['p90'])):,}")
+        st.caption(f"P10–P90: {int(round(ai['distributions']['total_jobs']['p10'])):,} – {int(round(ai['distributions']['total_jobs']['p90'])):,}")
         with c4:
             st.metric("Uncertainty (± around P50)", f"{ai['uncertainty_pct']}%")
         st.caption(
@@ -952,10 +1061,10 @@ if uploaded_file:
         bi = ai["distributions"]["better_indirect"]
         with c5:
             st.metric("Better-Direct (P50)", f"{int(round(bd['p50'])):,}")
-            st.caption(f"P10–P90: {int(round(bd['p10'])):,} – {int(round(bd['p90'])):,}")
+        st.caption(f"P10–P90: {int(round(bd['p10'])):,} – {int(round(bd['p90'])):,}")
         with c6:
             st.metric("Better-Indirect (P50)", f"{int(round(bi['p50'])):,}")
-            st.caption(f"P10–P90: {int(round(bi['p10'])):,} – {int(round(bi['p90'])):,}")
+        st.caption(f"P10–P90: {int(round(bi['p10'])):,} – {int(round(bi['p90'])):,}")
 
         # NEW: Forms in which jobs became "better"
         st.markdown("**How are these jobs 'better'? (forms)**")
@@ -963,47 +1072,61 @@ if uploaded_file:
         df_forms = pd.DataFrame([{**f, "share": f"{f['share']*100:.0f}%"} for f in forms])[ ["form","count","share","rationale"] ]
         st.dataframe(df_forms, hide_index=True, use_container_width=True)
 
-        # Evidence & Assumptions (NO SNIPPETS SHOWN — explanations only)
-        st.subheader("PAD Evidence and Signals Used — how each shaped the estimate (no snippets)")
-        # Financing amount explanation
+        # --- v2: Concise Evidence with Short Snippets ---
+        st.subheader("PAD Evidence and Signals Used — concise (w/ short snippets)")
+        # Financing amount (short)
         aq = ai["evidence"].get("amount_quote")
         if aq:
             page_note = f" (page {aq.get('page')})" if aq.get("page") else ""
             st.markdown("**Financing amount**" + page_note)
-            jpm_point = ai["assumptions"]["adj_jobs_per_million_point"]
-            st.markdown(
-                f"- The total number of jobs scales linearly with financing. The model multiplies jobs-per-$ by the detected financing amount (US${ai['investment_musd']:.2f}M)."
-                f" At the current jobs-per-$ point (≈ {jpm_point:.1f} jobs per US$1M), every additional US$1M would add ≈ {int(round(jpm_point))} jobs."
-            )
+            st.markdown(f"- Used US${ai['investment_musd']:.2f}M to scale jobs; each extra US$1M adds ≈ {int(round(ai['assumptions']['adj_jobs_per_million_point']))} jobs.")
+            if aq.get("quote"):
+                st.markdown(f"  > {short_snip(aq['quote'])}")
             if "default" in ai.get("confidence", "").lower() or (aq.get("quote") and "default" in aq.get("quote").lower()):
-                st.markdown("  - *No clear amount found; a default US$50M was used for scoping.*")
-
-        # Sector basis explanation
-        sect_text, base_jpm, base_dir = explain_sector_basis(ai["sector_weights"])
-        st.markdown(sect_text)
-
-        # Adjustment rules explanation (step-by-step impact)
-        st.markdown("**Signals that shaped quantity & quality**")
+                st.markdown("  - *No clear amount found; default US$50M used for scoping.*")
+        
+        # Sector basis (top examples only)
+        if ai["evidence"].get("sector_quotes"):
+            examples = top_sector_examples(ai["evidence"]["sector_quotes"], ai["sector_weights"], top_n=2)
+            if examples:
+                st.markdown("**Sector cues (top examples):**")
+                for ex in examples:
+                    st.markdown(f"- **{ex['sector']}** — page {ex['page']}")
+                    st.markdown(f"  > {short_snip(ex['quote'])}")
+        
+        # Top signals by impact (condensed)
         adj = ai["assumptions"]["adjustment_rules_fired"]
-        base_bj_d = ai["assumptions"]["base_better_prior"]
-        base_bj_i = base_bj_d - 0.03
-        for line in build_adjustment_explanations(ai["sector_weights"], base_jpm, base_dir, base_bj_d, base_bj_i, adj):
-            st.markdown(f"- {line}")
+        if adj:
+            st.markdown("**Key signals shaping the estimate (top 3):**")
+            for h in top_adjustment_hits(adj, top_n=3):
+                dpp = _fmt_pp(h["direct_share_delta"]) if h["direct_share_delta"] else "+0 pp"
+                jmult = h["jobs_per_million_mult"]
+                jpct = _fmt_pct(jmult-1) if jmult != 1 else "+0%"
+                bjd = _fmt_pp(h["better_job_delta_direct"]) if h["better_job_delta_direct"] else "+0 pp"
+                bji = _fmt_pp(h["better_job_delta_indirect"]) if h["better_job_delta_indirect"] else "+0 pp"
+                st.markdown(
+                    f"- **{h['name']}** (p.{h['page']}): jobs/$ {jpct}, direct share {dpp}, better-job +{bjd} (direct) / +{bji} (indirect)."
+                )
+                st.markdown(f"  > {short_snip(h['quote'])}")
+            extra = max(0, len(adj) - 3)
+            if extra:
+                st.caption(f"…and {extra} additional minor signals (omitted for brevity).")
 
-        with st.expander("What counts as a 'Better Job' here?"):
-            st.markdown(
-                "- **Higher wages/productivity potential** (skills, certification, upgrading)\n"
-                "- **Formality & social protection** (contracts, benefits, compliance)\n"
-                "- **Workplace safety (OSH)** (procedures, PPE, inspections)\n"
-                "- **Inclusion** (women, disability, childcare—reduces barriers)\n"
-                "- **Environmental quality** (green/clean production)\n\n"
-                "The model reads PAD signals on these aspects and estimates the probability that a job is 'better'.\n"
-                "Monte Carlo simulation yields **P50** and **P10–P90** ranges. Uncertainty narrows as evidence strengthens."
-            )
+        with st.expander("Details & methodology"):
+            sect_text, base_jpm, base_dir = explain_sector_basis(ai["sector_weights"])
+            st.markdown(sect_text)
+            st.markdown("**Signal-by-signal effects (full):**")
+            base_bj_d = ai["assumptions"]["base_better_prior"]
+            base_bj_i = base_bj_d - 0.03
+            for line in build_adjustment_explanations(ai["sector_weights"], base_jpm, base_dir, base_bj_d, base_bj_i, adj):
+                st.markdown(f"- {line}")
+            st.info("Monte Carlo simulation yields **P50** and **P10–P90** ranges. Uncertainty narrows as evidence strengthens.")
+
         st.info(
             "AI fallback estimates are for scoping and learning purposes. "
             "Use PAD-explicit indicators or task-team–validated figures for formal reporting."
         )
+
         # Download
         row = {
             "mode": ai["mode"],
